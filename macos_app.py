@@ -4,6 +4,7 @@ import time
 import threading
 import rumps
 import clipman
+import ssl
 import tkinter as tk
 from utils import create_text_image
 from ocr import ocr_image, is_question_with_image

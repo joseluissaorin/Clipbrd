@@ -421,7 +421,7 @@ def get_number_with_context(question, llm_router, search, inverted_index, docume
            top_p=0.9,
            stop_sequences=["User:", "Human:", "Assistant:"],
            image_data=image_data,
-           system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ... Use the provided context to help answer the question."
+           system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option, if it is indicated, there can be several correct answers, only in that case you must respond with several letters or questions. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ... Use the provided context to help answer the question."
        )
 
        # Extracting just the number from the response
@@ -440,13 +440,13 @@ def get_number_without_context(question, llm_router, image_data=None):
 
    response = llm_router.generate(
        model="claude-3-haiku-20240307",
-       max_tokens=2,
+       max_tokens=5,
        messages=messages,
        temperature=0.7,
        top_p=0.9,
        stop_sequences=["User:", "Human:", "Assistant:"],
        image_data=image_data,
-       system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ... "
+       system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option, if it is indicated, there can be several correct answers, only in that case you must respond with several letters or questions. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ... "
    )
 
    # Extracting just the number from the response
