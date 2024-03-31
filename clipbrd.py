@@ -72,10 +72,7 @@ if __name__ == "__main__":
    app = ClipbrdApp(llm_router, documents, inverted_index, terminate_event)
    
    # Setup screenshot shortcuts
-   threading.Thread(target=setup_screenshot_shortcut, args=(app.on_screenshot, predefined_region, shortcuts.get("predefined_screenshot"), terminate_event)).start()
+   threading.Thread(target=setup_screenshot_shortcut, args=(app.on_screenshot, shortcuts.get("predefined_screenshot"), terminate_event)).start()
    threading.Thread(target=setup_custom_screenshot_shortcut, args=(app.on_screenshot, shortcuts.get("custom_screenshot"), terminate_event)).start()
 
    app.run()
-
-   # Set the terminate event when the app quits
-   terminate_event.set()

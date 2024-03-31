@@ -1,5 +1,7 @@
+# windows_app.py
 import base64
 import io
+import os
 import time
 import threading
 import requests
@@ -158,6 +160,22 @@ class ClipbrdApp:
 
         window.mainloop()
 
+    def quit_icon(self, icon, item):
+        self.keep_running = False
+        self.terminate_event.set()
+        
+        # Wait for the clipboard check thread to finish
+        if self.clipboard_check_thread.is_alive():
+            self.clipboard_check_thread.join()
+        
+        # Wait for the screenshot threads to finish
+        for thread in threading.enumerate():
+            if thread.name.startswith("screenshot_thread"):
+                thread.join()
+        
+        icon.stop()
+        os._exit(0)  # Force exit the program
+
     def check_clipboard(self):
         current_clipboard = clipman.paste()
         if current_clipboard != self.last_clipboard and current_clipboard != self.question_clipboard:
@@ -188,22 +206,16 @@ class ClipbrdApp:
                 self.update_icon("Clipbrd: Done.")
                 self.debug_info.append(f"Answer: {answer}")
 
-    def quit_icon(self, icon, item):
-        icon.visible = False
-        self.keep_running = False
-        icon.stop()
-        self.terminate_event.set()
-        quit()
-
     def run(self):
         self.icon.run(self.setup)
 
     def setup(self, icon):
         icon.visible = True
-        threading.Thread(target=self.clipboard_check_loop).start()
+        self.clipboard_check_thread = threading.Thread(target=self.clipboard_check_loop)
+        self.clipboard_check_thread.start()
 
     def clipboard_check_loop(self):
-        while self.keep_running:
+        while self.keep_running and not self.terminate_event.is_set():
             self.check_clipboard()
             self.check_screenshot()
             time.sleep(1)

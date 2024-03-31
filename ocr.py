@@ -14,7 +14,7 @@ if platform.system() == 'Darwin':
 else:
     # Windows
     tesseract_data_path = "./data/tesseract"
-    pytesseract.tesseract_cmd = os.path.join(
+    pytesseract.pytesseract.tesseract_cmd = os.path.join(
            tesseract_data_path, "tesseract", "tesseract.exe")
     custom_config = r'--oem 3 --psm 6 -l spa+eng'
 
