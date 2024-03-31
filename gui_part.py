@@ -36,10 +36,21 @@ class GuiPart(object):
         def save_shortcuts_cmd():
             shortcut1 = shortcut1_entry.get()
             shortcut2 = shortcut2_entry.get()
-            shortcuts = {
-                "predefined_screenshot": shortcut1,
-                "custom_screenshot": shortcut2
-            }
+            if shortcut1 == None and shortcut2 != None:
+                shortcuts = {
+                    "predefined_screenshot": "<ctrl>+<shift>+p",
+                    "custom_screenshot": shortcut2
+                }
+            elif shortcut1 != None and shortcut2 == None:
+                shortcuts = {
+                    "predefined_screenshot": shortcut1,
+                    "custom_screenshot": "<ctrl>+<shift>+l"
+                }
+            elif shortcut1 == None and shortcut2 == None:
+                shortcuts = {
+                    "predefined_screenshot": "<ctrl>+<shift>+p",
+                    "custom_screenshot": "<ctrl>+<shift>+l"
+                }
             save_shortcuts(shortcuts)
             window.destroy()
 

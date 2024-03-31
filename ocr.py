@@ -1,4 +1,5 @@
 import platform
+import os
 import pytesseract
 import base64
 from io import BytesIO
@@ -12,7 +13,9 @@ if platform.system() == 'Darwin':
     p2t = Pix2Text(languages=("es", "en"))
 else:
     # Windows
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    tesseract_data_path = "./data/tesseract"
+    pytesseract.tesseract_cmd = os.path.join(
+           tesseract_data_path, "tesseract", "tesseract.exe")
     custom_config = r'--oem 3 --psm 6 -l spa+eng'
 
 def ocr_image(image_url=None, image_64=None):

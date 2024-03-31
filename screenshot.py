@@ -84,11 +84,25 @@ def select_region():
     return (left, top, left + width, top + height)
 
 def save_predefined_region(region):
+
+    # Define the path for the configuration file
     config_path = os.path.join(os.path.expanduser("~"), ".clipbrd", "config.json")
+    
+    # Ensure the directory for the configuration file exists
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
+    # Load shortcuts from the load_shortcuts function
+    shortcuts = load_shortcuts()
+
+    # Ensure load_shortcuts() returns a dictionary. If not, convert or handle appropriately.
+    assert isinstance(shortcuts, dict), "load_shortcuts() must return a dictionary"
+
+    # Merge predefined_region with the shortcuts dictionary
+    config_data = {"predefined_region": region, **shortcuts}
+
+    # Write the merged dictionary to the config file in JSON format
     with open(config_path, "w") as f:
-        json.dump({"predefined_region": region}, f)
+        json.dump(config_data, f)
 
 def load_predefined_region():
     config_path = os.path.join(os.path.expanduser("~"), ".clipbrd", "config.json")
