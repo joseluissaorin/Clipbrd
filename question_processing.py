@@ -414,7 +414,7 @@ def get_number_with_context(question, llm_router, search, inverted_index, docume
        ]
 
        response = llm_router.generate(
-           model="claude-3-haiku-20240307",
+           model="gpt-4-0125-preview",
            max_tokens=2,
            messages=messages,
            temperature=0.7,
@@ -439,7 +439,7 @@ def get_number_without_context(question, llm_router, image_data=None):
    ]
 
    response = llm_router.generate(
-       model="claude-3-haiku-20240307",
+       model="gpt-4-0125-preview",
        max_tokens=5,
        messages=messages,
        temperature=0.7,
@@ -449,10 +449,7 @@ def get_number_without_context(question, llm_router, image_data=None):
        system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option, if it is indicated, there can be several correct answers, only in that case you must respond with several letters or questions. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ... "
    )
 
-   # Extracting just the number from the response
-   answer_text = response
-   print(f"MCQ answer without context: {answer_text}")
-   return answer_text
+   return response
 
 
 def get_number_with_image(question, llm_router, image_data=None):
@@ -464,7 +461,7 @@ def get_number_with_image(question, llm_router, image_data=None):
    ]
 
    response = llm_router.generate(
-       model="gpt-4-vision-preview",
+       model="gpt-4-turbo",
        max_tokens=2,
        messages=messages,
        temperature=0.7,
