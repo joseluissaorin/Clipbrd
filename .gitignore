@@ -1,0 +1,4 @@
+.env
+__pycache__/
+windows_venv/
+builds/
