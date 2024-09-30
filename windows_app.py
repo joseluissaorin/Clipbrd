@@ -53,6 +53,10 @@ class ClipbrdApp:
         elif text == "Clipbrd: Working.":
             self.icon.icon = create_text_image(
                 "⛏️", background_color=(255, 0, 0, 0))
+        elif text == "Clipbrd: Taking Screenshot.":
+            print("Taking Screenshot")
+            self.icon.icon = create_text_image(
+                "📸", background_color=(255, 255, 255, 0))
         else:
             self.icon.icon = create_text_image(text.split(
                 ':')[-1], background_color=(255, 0, 0, 0))
@@ -71,6 +75,7 @@ class ClipbrdApp:
         window.mainloop()
 
     def take_full_screenshot(self, icon, item):
+        self.update_icon("Clipbrd: Taking Screenshot.")
         self.screenshot = take_screenshot()
 
     def configure_keyboard_shortcuts(self, icon, item):

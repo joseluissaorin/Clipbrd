@@ -21,7 +21,7 @@ def create_text_image(text, width=72, height=72, background_color='black', text_
         y = int((height - text_height) / 2)
 
         # Draw the text (with emojis) on the image
-        pilmoji.text((x, y), text, fill=text_color, font=font)
+        pilmoji.text((x, y), text, fill=text_color, font=font, emoji_position_offset=(0, -58), emoji_scale_factor=1)
 
     return image
 
