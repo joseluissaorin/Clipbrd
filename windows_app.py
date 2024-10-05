@@ -22,6 +22,7 @@ class ClipbrdApp:
     def __init__(self, llm_router, documents, inverted_index, terminate_event):
         self.icon = pystray.Icon("Clipbrd")
         self.keep_running = True
+        self.icon_text = ""
         self.icon.menu = pystray.Menu(
             item('Take Full Screen Screenshot', self.take_full_screenshot),
             item('Configure Keyboard Shortcuts', self.configure_keyboard_shortcuts),
@@ -42,6 +43,7 @@ class ClipbrdApp:
         self.search = search
     
     def update_icon(self, text):
+        self.icon_text = text
         if text == "Clipbrd":
             response = requests.get(
                 "https://img.joseluissaorin.com/clipbrd_logo_4.png")
@@ -62,6 +64,8 @@ class ClipbrdApp:
                 ':')[-1], background_color=(255, 0, 0, 0))
 
     def on_screenshot(self, image):
+        if self.icon_text != "Clipbrd: Taking Screenshot.":
+            self.update_icon("Clipbrd: Taking Screenshot.")
         self.screenshot = image
 
     def show_debug_info(self, sender):

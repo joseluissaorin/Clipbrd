@@ -8,14 +8,18 @@ from pynput import keyboard, mouse
 from PIL import ImageGrab, Image
 import threading
 
-def setup_custom_screenshot_shortcut(callback, shortcut_key='<ctrl>+<shift>+o', terminate_event=None):
+def setup_custom_screenshot_shortcut(callback, shortcut_key, terminate_event=None):
     def on_activate():
-        screenshot = take_screenshot(predefined=False)
-        callback(screenshot)
+        if callback.__name__ == 'take_full_screenshot':
+            screenshot = take_screenshot()
+            callback(None, None)  # Call take_full_screenshot with None arguments
+        else:
+            screenshot = take_screenshot()
+            callback(screenshot)
 
     if sys.platform == 'darwin':  # macOS
         keyboard_thread = threading.Thread(target=keyboard.GlobalHotKeys, args=({shortcut_key: on_activate},), kwargs={"terminate_event": terminate_event})
-        keyboard_thread.name = "screenshot_thread_custom"
+        keyboard_thread.name = f"screenshot_thread_{callback.__name__}"
         keyboard_thread.daemon = True
         keyboard_thread.start()
     else:  # Windows or other platforms
@@ -45,11 +49,11 @@ def load_shortcuts():
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             config = json.load(f)
-            shortcuts = {
-                "predefined_screenshot": config.get("predefined_screenshot", "<ctrl>+<shift>+p"),
-                "custom_screenshot": config.get("custom_screenshot", "<ctrl>+<shift>+l")
-            }
-            return shortcuts
+            return config
     else:
-        shortcuts = {"predefined_screenshot": "<ctrl>+<shift>+p", "custom_screenshot": "<ctrl>+<shift>+l"}
-        return shortcuts
+        return {
+            "predefined_screenshot": "<ctrl>+<shift>+p",
+            "custom_screenshot": "<ctrl>+<shift>+l",
+            "full_screenshot": "<ctrl>+<shift>+f"
+        }
+    
