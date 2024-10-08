@@ -67,6 +67,9 @@ class ClipbrdApp(rumps.App):
 
     def update_title(self, text):
         self.title = text
+    
+    def update_icon(self, text):
+        self.title = text
 
     def on_screenshot(self, image):
         if self.title != "Clipbrd: Taking Screenshot.":

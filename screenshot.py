@@ -8,6 +8,8 @@ from pynput import keyboard, mouse
 from PIL import ImageGrab, Image
 import threading
 
+from ocr import compress_image_to_size
+
 def setup_custom_screenshot_shortcut(callback, shortcut_key, terminate_event=None):
     def on_activate():
         if callback.__name__ == 'take_full_screenshot':
@@ -32,7 +34,9 @@ def take_screenshot():
     screenshot = ImageGrab.grab()
     buffered = io.BytesIO()
     screenshot.save(buffered, format="PNG")
-    base64_screenshot = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    buffered.seek(0)
+    compressed_screenshot = compress_image_to_size(buffered, 1024, 4096)
+    base64_screenshot = base64.b64encode(compressed_screenshot).decode('utf-8')
     return base64_screenshot
 
 def save_shortcuts(shortcuts):
