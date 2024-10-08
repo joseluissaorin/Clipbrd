@@ -152,11 +152,11 @@ def extract_question_from_ocr(image_url, llm_router):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful assistant that extracts the main question from OCR text. The text is from a screenshot of a test or exam. Determine the most probable question that the user is trying to answer and format it in markdown."
+            "content": "You are a helpful assistant that extracts the main question from OCR text. The text is from a screenshot of a test or exam. Determine the most probable question that the user is trying to answer and format it in markdown. You must not only include the question but also the options, it is most probably a multiple choice question and the content of the options, you must not add anything else or try to answer it"
         },
         {
             "role": "user",
-            "content": f"Extract the main question from the following OCR text and format it in markdown:\n\n{ocr_text}"
+            "content": f"Extract the main question and options from the following OCR text and format it in markdown:\n\n{ocr_text}"
         }
     ]
 

@@ -17,14 +17,16 @@ def setup_custom_screenshot_shortcut(callback, shortcut_key, terminate_event=Non
             screenshot = take_screenshot()
             callback(screenshot)
 
-    if sys.platform == 'darwin':  # macOS
-        keyboard_thread = threading.Thread(target=keyboard.GlobalHotKeys, args=({shortcut_key: on_activate},), kwargs={"terminate_event": terminate_event})
-        keyboard_thread.name = f"screenshot_thread_{callback.__name__}"
-        keyboard_thread.daemon = True
-        keyboard_thread.start()
-    else:  # Windows or other platforms
-        with keyboard.GlobalHotKeys({shortcut_key: on_activate}, terminate_event=terminate_event) as h:
-            h.join()
+    try:
+        hotkeys = keyboard.GlobalHotKeys({shortcut_key: on_activate})
+        hotkeys.start()
+
+        # Optionally handle termination
+        if terminate_event:
+            terminate_event.wait()
+            hotkeys.stop()
+    except Exception as e:
+        print(f"Error setting up shortcut: {e}")
 
 def take_screenshot():
     screenshot = ImageGrab.grab()
@@ -46,14 +48,22 @@ def save_shortcuts(shortcuts):
 def load_shortcuts():
     config_path = os.path.join(os.path.expanduser("~"), ".clipbrd", "config.json")
 
+    predefined_shortcuts = {
+        "predefined_screenshot": "<ctrl>+<shift>+p",
+        "custom_screenshot": "<ctrl>+<shift>+l",
+        "full_screenshot": "<ctrl>+<shift>+f"
+    }
+
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             config = json.load(f)
+            print(config)
+            # Add predefined shortcuts if they are missing
+            for key, value in predefined_shortcuts.items():
+                if key not in config:
+                    config[key] = value
             return config
     else:
-        return {
-            "predefined_screenshot": "<ctrl>+<shift>+p",
-            "custom_screenshot": "<ctrl>+<shift>+l",
-            "full_screenshot": "<ctrl>+<shift>+f"
-        }
+        print("predefined")
+        return predefined_shortcuts
     

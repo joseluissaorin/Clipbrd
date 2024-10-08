@@ -10,7 +10,14 @@ from glob import glob
 # (None in this selection)
 
 # Local application imports
-from windows_app import ClipbrdApp
+import sys
+
+if sys.platform == 'win32':
+    from windows_app import ClipbrdApp
+elif sys.platform == 'darwin':
+    from macos_app import ClipbrdApp
+else:
+    raise ImportError("Unsupported operating system")
 from llmrouter import LLMRouter
 from utils import download_pandoc
 from document_processing import process_documents
@@ -70,8 +77,11 @@ if __name__ == "__main__":
 
       # Instantiate Clipbrd Class
    app = ClipbrdApp(llm_router, documents, inverted_index, terminate_event)
+
+   screenshot_shortcut = shortcuts.get("full_screenshot")
+   print(screenshot_shortcut)
    
    # Setup screenshot shortcuts
-   threading.Thread(target=setup_custom_screenshot_shortcut, args=(app.on_screenshot, shortcuts.get("full_screenshot"), terminate_event)).start()
+   threading.Thread(target=setup_custom_screenshot_shortcut, args=(app.on_screenshot, screenshot_shortcut, terminate_event)).start()
 
    app.run()

@@ -151,6 +151,7 @@ def generate_n_grams(words, max_n):
 def search(queries, inverted_index, documents):
     # Combine all queries into one text
     query_text = ' '.join(queries)
+    print(query_text)
 
     # Tokenize and lemmatize the combined query
     query_words = list(simple_tokenizer(query_text))
