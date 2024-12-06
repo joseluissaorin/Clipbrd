@@ -12,14 +12,13 @@ def is_formatted_question(text, llm_router):
         return True, clipboard
     else:
         response = llm_router.generate(
-            model="gpt-4o-mini",
+            model="claude-3-haiku-20240307",
             max_tokens=1,
             messages=[
                 {
                     "role": "user",
                     "content": text
                 },
-
             ],
             temperature=0.7,
             top_p=0.9,
@@ -294,7 +293,7 @@ def is_question(text, llm_router):
 
 def get_related_terms(question, llm_router):
    related_terms_response = llm_router.generate(
-       model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+       model="claude-3-haiku-20240307",
        max_tokens=30,
        messages=[
            {
@@ -367,7 +366,7 @@ def get_answer_with_context(question, llm_router, search, inverted_index, docume
         ]
 
         response = llm_router.generate(
-            model="gpt-4o-mini",
+            model="claude-3-haiku-20240307",
             max_tokens=475,
             messages=messages,
             temperature=0.7,
@@ -401,7 +400,7 @@ def get_number_with_context(question, llm_router, search, inverted_index, docume
         ]
 
         response = llm_router.generate(
-            model="gpt-4o-mini",
+            model="claude-3-haiku-20240307",
             max_tokens=2,
             messages=messages,
             temperature=0.7,
@@ -426,7 +425,7 @@ def get_number_without_context(question, llm_router, image_data=None):
    ]
 
    response = llm_router.generate(
-       model="gpt-4o-mini",
+       model="claude-3-haiku-20240307",
        max_tokens=5,
        messages=messages,
        temperature=0.7,
@@ -463,7 +462,7 @@ def get_answer_with_image(question, llm_router, image_data=None):
    ]
 
    response = llm_router.generate(
-       model="gpt-4o-mini",
+       model="claude-3-haiku-20240307",
        max_tokens=475,
        messages=messages,
        temperature=0.7,
@@ -486,7 +485,7 @@ def get_answer_without_context(question, llm_router, image_data=None):
    ]
 
    response = llm_router.generate(
-       model="gpt-4o-mini",
+       model="claude-3-haiku-20240307",
        max_tokens=650,
        messages=messages,
        temperature=0.7,

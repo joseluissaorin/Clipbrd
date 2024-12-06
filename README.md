@@ -1,92 +1,160 @@
 # Clipbrd
 
-Clipbrd is a powerful, AI-driven clipboard assistant designed to enhance your productivity by providing instant answers to questions directly from your clipboard. This cross-platform application offers a range of features to streamline your workflow and make information retrieval effortless.
+Clipbrd is an advanced AI-powered clipboard manager that seamlessly integrates with your workflow to provide instant, context-aware answers using local documents and multiple AI models. The application is designed to be lightweight, efficient, and cross-platform compatible.
 
-## Key Features
+> **Note**: This is the open repository for the [Clipbrd subscription service](https://clipbrdapp.com). While the code includes subscription and licensing features, intermediate programmers can easily patch these components and build a version using their own API keys. The core functionality requires:
+> - An Anthropic API key for Claude
+> - An OpenAI API key for GPT-4 (optional)
+> - A DeepInfra API key (optional)
 
-### 1. AI-Powered Clipboard Assistance
-- Automatically detects and processes questions from your clipboard.
-- Provides quick answers using advanced AI models.
-- Supports both multiple-choice questions (MCQs) and open-ended questions.
+## Core Features
 
-### 2. Local RAG (Retrieval-Augmented Generation) Processing
-- Process and index your local documents for context-aware answers.
-- Supports various file formats including .docx, .pptx, .pdf, .txt, and .md.
-- Simple drag-and-drop functionality for adding documents to the Clipbrd folder.
+### Intelligent Clipboard Processing
+- Real-time monitoring of clipboard changes
+- Automatic question detection and classification (MCQ vs. open-ended)
+- Support for both text and image-based inputs
+- Asynchronous processing with rate limiting and caching
+- Batch processing capabilities for improved performance
 
-### 3. OCR and Screenshot Processing
-- Capture full-screen screenshots with customizable keyboard shortcuts.
-- Extract text from images using OCR technology.
-- Analyze and understand the content of screenshots to formulate questions.
+### Document Processing & RAG
+- Local document indexing using AsyncBM25Index
+- Support for multiple document formats (.txt, .md, .docx, .pdf)
+- Efficient chunking and tokenization
+- N-gram based search functionality
+- Memory-efficient document processing with streaming capabilities
 
-### 4. Minimalist GUI
-- Runs quietly in the system tray/menu bar.
-- Displays concise answer indicators (e.g., MCQ option numbers) in the icon.
+### AI Integration
+- Multiple AI model support (Claude, GPT-4, DeepInfra)
+- Context-aware answer generation
+- Image understanding and OCR processing
+- Flexible prompt engineering for different question types
+- Automatic model selection based on task requirements
 
-### 5. Multi-Model AI Integration
-- Utilizes different AI models optimized for various tasks:
-  - Question detection and formatting
-  - Context retrieval
-  - Answer generation
-- Incorporates multimodal AI for image understanding and question extraction.
+### Screenshot & OCR Capabilities
+- Global keyboard shortcuts for screenshot capture
+- Image compression and optimization
+- OCR text extraction with error handling
+- Question detection from image content
+- Support for copy-protected text through screenshots
 
-### 6. Cross-Platform Compatibility
-- Works on both Windows and macOS.
-- Shared codebase with platform-specific GUI implementations.
+### Platform Integration
+- Cross-platform system tray/menu bar implementation
+- Native notifications
+- Custom keyboard shortcuts
+- Automatic startup configuration
+- Minimize to tray functionality
 
-### 7. Lightweight and Self-Contained
-- Minimal external dependencies for easy installation and execution.
-- Includes necessary components like Pandoc for document processing.
+### Security & Licensing
+- Secure license key storage using system keyring
+- Encrypted local data storage
+- License validation and verification
+- Automatic updates and dependency management
+- Offline operation support
 
-### 8. Debug Information
-- Built-in debug mode for troubleshooting and performance monitoring.
+## Technical Architecture
+
+### Core Components
+1. **Main Application (`clipbrd.py`)**
+   - Application initialization and lifecycle management
+   - Component coordination
+   - Event handling
+
+2. **Document Processing (`document_processing.py`)**
+   - AsyncBM25Index implementation
+   - Document chunking and indexing
+   - Search functionality
+
+3. **Clipboard Processing (`clipboard_processing.py`)**
+   - Clipboard monitoring and content extraction
+   - Question detection and routing
+   - Rate limiting and caching
+
+4. **Platform Interface (`platform_interface.py`)**
+   - Cross-platform GUI abstraction
+   - System tray/menu bar integration
+   - Native notifications
+
+### Supporting Modules
+5. **Settings Manager (`settings_manager.py`)**
+   - Configuration persistence
+   - Settings UI
+   - Debug logging
+
+6. **License Manager (`license_manager.py`)**
+   - License validation
+   - Secure storage
+   - Update checking
+
+7. **Question Processing (`question_processing.py`)**
+   - Question classification
+   - Answer generation
+   - Context retrieval
+
+8. **Screenshot Management (`screenshot.py`)**
+   - Screen capture
+   - Image optimization
+   - Shortcut handling
+
+## Requirements
+
+### System Requirements
+- Windows 10+ or macOS 10.15+
+- Python 3.10
+- 4GB RAM minimum (8GB recommended)
+- LibreOffice (for document processing)
+
+### Dependencies
+- Required Python packages are managed through `dependency_manager.py`
+- External dependencies:
+  - LibreOffice (document conversion)
+  - Pandoc (markdown processing)
 
 ## Installation
 
-[Provide installation instructions here]
-
-## Usage
-
-1. Launch the Clipbrd application.
-2. Copy a question to your clipboard or take a screenshot containing a question.
-3. Clipbrd will automatically process the input and provide an answer.
-4. For MCQs, the answer will be displayed in the system tray/menu bar icon.
-5. For open-ended questions, the answer will be copied to your clipboard.
+1. Clone the repository
+2. Install LibreOffice
+3. Run the dependency manager:
+```python
+python -m dependency_manager install
+```
+4. Launch the application:
+```python
+python clipbrd.py
+```
 
 ## Configuration
 
-- Access settings through the system tray/menu bar icon.
-- Customize keyboard shortcuts for screenshot capture.
-- Configure the Clipbrd folder location for document processing.
+### Environment Variables
+```
+ANTHROPIC_API_KEY=your_claude_api_key
+OPENAI_API_KEY=your_gpt4_api_key
+DEEPINFRA_API_KEY=your_deepinfra_key
+```
 
-## Notes
+### Settings
+Access settings through the system tray/menu bar icon:
+- Theme customization
+- Keyboard shortcuts
+- Debug mode
+- Language selection
+- Notification preferences
 
-- The current implementation is primarily in Python, which may present challenges for compilation on macOS. Future versions may consider using a different language for improved cross-platform compilation.
-- The subscription-based service with Stripe integration and piracy prevention is not yet implemented in the provided code.
-- LaTeX understanding, code generation, and execution for math questions are not currently implemented.
+## Development
 
-## Contributing
+### Debug Mode
+Enable debug mode through settings to access:
+- Real-time log viewing
+- Performance metrics
+- Memory usage statistics
+- Processing statistics
 
-[Right now there is no contribution policy]
+### Contributing
+Currently, you may only fork this repository and use it as a base for your own projects, I am not accepting pull requests at this time. Maybe, in the future, I will change this.
 
 ## License
 Copyright (c) 2024 José Luis Saorín
+Licensed under MIT License. See LICENSE file for details.
 
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+## Known Limitations
+- Python-based implementation may affect compilation on macOS
+- LaTeX and code execution features planned for future releases

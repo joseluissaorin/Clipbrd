@@ -1,87 +1,150 @@
 # clipbrd.py
-# Standard library imports
 import os
 import sys
-import threading
-import queue
-from glob import glob
+import asyncio
+import logging
+from typing import Dict, Callable, Optional
 
-# Third-party imports
-# (None in this selection)
+from platform_interface import PlatformConfig, create_platform_interface
+from settings_manager import SettingsManager
+from dependency_manager import DependencyManager
+from clipboard_processing import ClipboardProcessor
+from progress_indicator import ProgressIndicator
 
-# Local application imports
-import sys
+class Clipbrd:
+    def __init__(self):
+        self.settings = SettingsManager()
+        self.clipboard = ClipboardProcessor()
+        self.platform = None
+        self.running = False
+        self.progress = ProgressIndicator(app=self)
+        self.setup_logging()
+    
+    def setup_logging(self):
+        logging.basicConfig(
+            level=logging.DEBUG if self.settings.get_setting('debug_mode') else logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        self.logger = logging.getLogger('Clipbrd')
+    
+    async def initialize(self):
+        """Initialize the application."""
+        try:
+            # Initialize dependencies
+            dep_manager = DependencyManager()
+            if not await dep_manager.install_dependencies():
+                self.logger.error("Failed to install dependencies")
+                return False
+            
+            # Setup platform interface
+            platform_config = PlatformConfig(
+                app_name="Clipbrd",
+                icon_path=self.get_icon_path(),
+                menu_items=self.get_menu_items(),
+                debug_mode=self.settings.get_setting('debug_mode')
+            )
+            self.platform = create_platform_interface(platform_config)
+            
+            if not self.platform.initialize():
+                self.logger.error("Failed to initialize platform interface")
+                return False
+            
+            # Initialize clipboard processor
+            await self.clipboard.initialize()
+            
+            self.running = True
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize application: {e}")
+            return False
+    
+    def get_icon_path(self) -> str:
+        """Get the appropriate icon path based on the platform."""
+        icon_dir = os.path.join(os.path.dirname(__file__), 'assets', 'icons')
+        if sys.platform == 'darwin':
+            return os.path.join(icon_dir, 'clipbrd_macos.png')
+        else:
+            return os.path.join(icon_dir, 'clipbrd_windows.ico')
+    
+    def get_menu_items(self) -> Dict[str, Callable]:
+        """Get the menu items configuration."""
+        return {
+            'Settings': self.show_settings,
+            'About': self.show_about,
+            'Quit': self.quit
+        }
+    
+    def show_settings(self, _=None):
+        """Show settings dialog."""
+        self.settings.show_dialog()
+    
+    def show_about(self, _=None):
+        """Show about dialog."""
+        self.platform.show_notification(
+            "About Clipbrd",
+            "Clipbrd - Your AI-powered clipboard assistant\nVersion 1.0.0"
+        )
+    
+    def quit(self, _=None):
+        """Quit the application."""
+        self.running = False
+        self.cleanup()
+        sys.exit(0)
+    
+    async def process_clipboard(self):
+        """Process clipboard content."""
+        try:
+            while self.running:
+                content = await self.clipboard.get_content()
+                if content:
+                    self.progress.start("Processing clipboard content...")
+                    result = await self.clipboard.process_content(content)
+                    self.progress.stop()
+                    
+                    if result:
+                        self.platform.update_icon("✓")
+                        self.platform.show_notification(
+                            "Content Processed",
+                            "Clipboard content has been processed successfully"
+                        )
+                    else:
+                        self.platform.update_icon("!")
+                
+                await asyncio.sleep(1)
+        except Exception as e:
+            self.logger.error(f"Error processing clipboard: {e}")
+            self.platform.update_icon("⚠")
+    
+    def cleanup(self):
+        """Clean up resources."""
+        try:
+            if self.platform:
+                self.platform.cleanup()
+            self.clipboard.cleanup()
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
+    
+    async def run(self):
+        """Run the application."""
+        if await self.initialize():
+            try:
+                clipboard_task = asyncio.create_task(self.process_clipboard())
+                self.platform.run()  # This blocks until the app is quit
+                await clipboard_task  # Ensure clipboard task is properly cleaned up
+            except Exception as e:
+                self.logger.error(f"Error running application: {e}")
+            finally:
+                self.cleanup()
+        else:
+            self.logger.error("Failed to initialize application")
 
-if sys.platform == 'win32':
-    from windows_app import ClipbrdApp
-elif sys.platform == 'darwin':
-    from macos_app import ClipbrdApp
-else:
-    raise ImportError("Unsupported operating system")
-from llmrouter import LLMRouter
-from utils import download_pandoc
-from document_processing import process_documents
-from screenshot import (
-    setup_custom_screenshot_shortcut,
-    load_shortcuts
-)
+def main():
+    """Main entry point."""
+    app = Clipbrd()
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.run(app.run())
 
-# Setup LLMRouter
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
-
-llm_router = LLMRouter(
-   anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
-   openai_api_key=os.environ.get("OPENAI_API_KEY"),
-   deepinfra_api_key=os.environ.get("DEEPINFRA_API_KEY")
-)
-
-# Get the user's Documents folder path
-documents_folder = os.path.expanduser("~/Documents")
-if not os.path.exists(documents_folder):
-   documents_folder = glob(os.path.expanduser("~\\*\\Documents"))  # For Windows with OneDrive
-if not os.path.exists(documents_folder):
-   documents_folder = glob(os.path.expanduser("~\\*\\Documentos"))  # For Spanish Windows with OneDrive
-if not os.path.exists(documents_folder):
-   documents_folder = os.path.expanduser("~/Library/Documents")  # For macOS
-if not os.path.exists(documents_folder):
-   documents_folder = os.path.expanduser("~/Documentos")  # For Spanish language systems
-
-# Create the Clipbrd folder in the user's Documents directory if it doesn't exist
-clipbrd_folder = os.path.join(documents_folder, "Clipbrd")
-if not os.path.exists(clipbrd_folder):
-   os.makedirs(clipbrd_folder)
-   print(f"Created the folder {clipbrd_folder}")
-
-# Global variables
-documents = None
-inverted_index = None
-
-if __name__ == "__main__":
-   # Download Data
-   download_pandoc()
-
-   # Process documents on app start
-   documents, inverted_index = process_documents(clipbrd_folder)
-
-   # Create a threading event for terminating the threads
-   terminate_event = threading.Event()
-
-   # Load shortcuts from file
-   shortcuts = load_shortcuts()
-
-   # Create a queue for Tkinter tasks
-   tk_queue = queue.Queue()
-
-      # Instantiate Clipbrd Class
-   app = ClipbrdApp(llm_router, documents, inverted_index, terminate_event)
-
-   screenshot_shortcut = shortcuts.get("full_screenshot")
-   print(screenshot_shortcut)
-   
-   # Setup screenshot shortcuts
-   threading.Thread(target=setup_custom_screenshot_shortcut, args=(app.on_screenshot, screenshot_shortcut, terminate_event)).start()
-
-   app.run()
+if __name__ == '__main__':
+    main()
