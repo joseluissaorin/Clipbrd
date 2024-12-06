@@ -50,10 +50,9 @@ class LicenseManager:
     def _encrypt_data(self, data: dict) -> str:
         """Encrypt dictionary data to string."""
         try:
-            self.logger.debug(f"Encrypting data structure: {list(data.keys())}")
             json_data = json.dumps(data)
             encrypted = self.fernet.encrypt(json_data.encode()).decode()
-            self.logger.debug("Data encrypted successfully")
+            self.logger.debug("License data encrypted successfully")
             return encrypted
         except Exception as e:
             self.logger.error(f"Error encrypting data: {str(e)}")
@@ -62,10 +61,9 @@ class LicenseManager:
     def _decrypt_data(self, encrypted_data: str) -> dict:
         """Decrypt string to dictionary data."""
         try:
-            self.logger.debug("Attempting to decrypt license data")
             decrypted = self.fernet.decrypt(encrypted_data.encode())
             data = json.loads(decrypted)
-            self.logger.debug(f"Data decrypted successfully, keys: {list(data.keys())}")
+            self.logger.debug("License data decrypted successfully")
             return data
         except Exception as e:
             self.logger.error(f"Error decrypting license data: {str(e)}")
@@ -74,20 +72,18 @@ class LicenseManager:
     def get_stored_license(self) -> Tuple[Optional[str], Optional[dict]]:
         """Get stored license key and data from system keyring."""
         try:
-            self.logger.debug("Retrieving stored license information")
             key = keyring.get_password(self.APP_NAME, self.LICENSE_KEY)
             encrypted_data = keyring.get_password(self.APP_NAME, self.LICENSE_DATA)
             
             if key and encrypted_data:
-                self.logger.debug(f"Found stored license key: {key[:5]}...")
+                self.logger.info("Found stored license")
                 data = self._decrypt_data(encrypted_data)
                 if data:
-                    self.logger.debug(f"License data retrieved successfully. Expires: {data.get('expires_at')}")
                     return key, data
                 else:
                     self.logger.warning("Failed to decrypt stored license data")
             else:
-                self.logger.debug("No stored license found")
+                self.logger.info("No stored license found")
             return None, None
         except Exception as e:
             self.logger.error(f"Error retrieving stored license: {str(e)}")
@@ -96,9 +92,7 @@ class LicenseManager:
     def store_license(self, license_key: str, license_data: dict) -> None:
         """Store license key and data in system keyring."""
         try:
-            self.logger.debug(f"Storing license key: {license_key[:5]}...")
-            self.logger.debug(f"License data to store: {json.dumps(license_data, indent=2)}")
-            
+            self.logger.info("Storing license information")
             encrypted_data = self._encrypt_data(license_data)
             keyring.set_password(self.APP_NAME, self.LICENSE_KEY, license_key)
             keyring.set_password(self.APP_NAME, self.LICENSE_DATA, encrypted_data)
@@ -110,7 +104,7 @@ class LicenseManager:
     def clear_stored_license(self) -> None:
         """Clear stored license information."""
         try:
-            self.logger.debug("Attempting to clear stored license")
+            self.logger.info("Clearing stored license")
             keyring.delete_password(self.APP_NAME, self.LICENSE_KEY)
             keyring.delete_password(self.APP_NAME, self.LICENSE_DATA)
             self.logger.info("License cleared successfully")
@@ -122,8 +116,7 @@ class LicenseManager:
     def _verify_with_supabase(self, license_key: str) -> Dict[str, Any]:
         """Internal method to verify license with Supabase."""
         try:
-            self.logger.debug(f"Verifying license with Supabase: {license_key[:5]}...")
-            self.logger.debug(f"Using Supabase URL: {self.supabase_url}")
+            self.logger.info("Verifying license with Supabase")
             
             headers = {
                 'apikey': self.supabase_key,
@@ -133,7 +126,6 @@ class LicenseManager:
             }
             
             data = {'input_key': license_key}
-            self.logger.debug("Sending verification request to Supabase...")
             
             response = requests.post(
                 f"{self.supabase_url}/rest/v1/rpc/verify_license_key",
@@ -141,33 +133,30 @@ class LicenseManager:
                 json=data
             )
             
-            self.logger.debug(f"Supabase response status: {response.status_code}")
-            self.logger.debug(f"Supabase response headers: {dict(response.headers)}")
-            self.logger.debug(f"Supabase raw response: {response.text}")
-            
             response.raise_for_status()
             result = response.json()
             
-            self.logger.debug(f"License verification result: {json.dumps(result, indent=2)}")
+            if result.get('is_valid'):
+                self.logger.info("License verification successful")
+            else:
+                self.logger.warning("License verification failed")
+            
             return result
             
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error in Supabase request: {str(e)}")
+            self.logger.error("Error in license verification request")
             if hasattr(e, 'response') and e.response is not None:
                 self.logger.error(f"Error response status: {e.response.status_code}")
-                self.logger.error(f"Error response headers: {dict(e.response.headers)}")
-                self.logger.error(f"Error response body: {e.response.text}")
                 
                 if hasattr(e.response, 'json'):
                     try:
                         error_data = e.response.json()
-                        self.logger.error(f"Parsed error response: {json.dumps(error_data, indent=2)}")
                         return {
                             'is_valid': False,
                             'message': error_data.get('message', 'Invalid license key'),
                         }
-                    except json.JSONDecodeError as json_err:
-                        self.logger.error(f"Failed to parse error response as JSON: {str(json_err)}")
+                    except json.JSONDecodeError:
+                        self.logger.error("Failed to parse error response")
             return {
                 'is_valid': False,
                 'message': 'Failed to verify license'
@@ -205,7 +194,7 @@ class LicenseManager:
 
             return {
                 'status': 'success',
-                'message': f'License activated successfully. Valid until {verification_result.get("expires_at")}',
+                'message': f'License activated successfully. Valid until {verification_result.get("expires_at")}. Please restart the application.',
                 'expires_at': verification_result.get('expires_at')
             }
 

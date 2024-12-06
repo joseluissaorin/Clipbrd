@@ -213,7 +213,6 @@ async def process_documents(
     stats = ProcessingStats()
     
     try:
-        await check_and_install_dependencies()
         
         processed_folder = os.path.join(folder_path, "processed_files")
         os.makedirs(processed_folder, exist_ok=True)

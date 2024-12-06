@@ -176,7 +176,7 @@ def is_question_with_image(image_url, llm_router):
     ]
 
     response = llm_router.generate(
-        model="gpt-4o-mini",
+        model="gemini-1.5-flash",
         max_tokens=3,
         messages=messages,
         temperature=0.7,
@@ -213,7 +213,7 @@ def extract_text_from_image(image_url, llm_router):
     ]
 
     response = llm_router.generate(
-        model="gpt-4o-mini",
+        model="gemini-1.5-flash",
         max_tokens=300,
         messages=messages,
         temperature=0.7,
@@ -241,7 +241,7 @@ def extract_question_from_ocr(image_url, llm_router):
     ]
 
     response = llm_router.generate(
-        model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+        model="gemini-1.5-flash",
         max_tokens=300,
         messages=messages,
         temperature=0.7,

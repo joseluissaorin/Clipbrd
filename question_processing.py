@@ -1,7 +1,8 @@
 import re
 import clipman
+import asyncio
 
-def is_formatted_question(text, llm_router):
+async def is_formatted_question(text, llm_router):
     is_mcq = False
     clipboard = text
     is_mcq, clipboard = check_and_modify_mcq_format_flexible(clipboard)
@@ -11,8 +12,8 @@ def is_formatted_question(text, llm_router):
         print("MCQ detected by regex: yes")
         return True, clipboard
     else:
-        response = llm_router.generate(
-            model="claude-3-haiku-20240307",
+        response = await llm_router.generate(
+            model="gemini-1.5-flash-8b",
             max_tokens=1,
             messages=[
                 {
@@ -268,9 +269,9 @@ def is_formatted_question(text, llm_router):
             return False, clipboard
 
 
-def is_question(text, llm_router):
-    response = llm_router.generate(
-        model="gpt-4o-mini",
+async def is_question(text, llm_router):
+    response = await llm_router.generate(
+        model="gemini-1.5-flash-8b",
         max_tokens=3,
         messages=[
             {
@@ -291,9 +292,9 @@ def is_question(text, llm_router):
         return False
 
 
-def get_related_terms(question, llm_router):
-   related_terms_response = llm_router.generate(
-       model="claude-3-haiku-20240307",
+async def get_related_terms(question, llm_router):
+   related_terms_response = await llm_router.generate(
+       model="gemini-1.5-flash-8b",
        max_tokens=30,
        messages=[
            {
@@ -310,13 +311,13 @@ def get_related_terms(question, llm_router):
    return related_terms
 
 
-def search_for_context(question, llm_router, search, inverted_index, documents):
+async def search_for_context(question, llm_router, search, inverted_index, documents):
     # Generate related terms
-    related_terms = get_related_terms(question, llm_router)
+    related_terms = await get_related_terms(question, llm_router)
 
     # Search for related files  
     relevant_files = []
-    results = search(related_terms, inverted_index, documents)
+    results = await search(related_terms, inverted_index, documents)
     relevant_files.extend(results)
 
     relevant_files = list(set(relevant_files))
@@ -347,8 +348,8 @@ def search_for_context(question, llm_router, search, inverted_index, documents):
         print(f"Context preview: {context[:200]}...")  # Print first 200 characters of the context
     return context
 
-def get_answer_with_context(question, llm_router, search, inverted_index, documents, image_data=None):
-    context = search_for_context(question, llm_router, search, inverted_index, documents)
+async def get_answer_with_context(question, llm_router, search, inverted_index, documents, image_data=None):
+    context = await search_for_context(question, llm_router, search, inverted_index, documents)
     
     if context == "":
         return None
@@ -365,8 +366,8 @@ def get_answer_with_context(question, llm_router, search, inverted_index, docume
             }
         ]
 
-        response = llm_router.generate(
-            model="claude-3-haiku-20240307",
+        response = await llm_router.generate(
+            model="gemini-1.5-flash",
             max_tokens=475,
             messages=messages,
             temperature=0.7,
@@ -381,8 +382,8 @@ def get_answer_with_context(question, llm_router, search, inverted_index, docume
         return answer_text
 
 
-def get_number_with_context(question, llm_router, search, inverted_index, documents, image_data=None):
-    context = search_for_context(question, llm_router, search, inverted_index, documents)
+async def get_number_with_context(question, llm_router, search, inverted_index, documents, image_data=None):
+    context = await search_for_context(question, llm_router, search, inverted_index, documents)
     
     if context == "":
         return None
@@ -399,8 +400,8 @@ def get_number_with_context(question, llm_router, search, inverted_index, docume
             }
         ]
 
-        response = llm_router.generate(
-            model="claude-3-haiku-20240307",
+        response = await llm_router.generate(
+            model="gemini-1.5-flash",
             max_tokens=2,
             messages=messages,
             temperature=0.7,
@@ -416,32 +417,7 @@ def get_number_with_context(question, llm_router, search, inverted_index, docume
         return answer_text
 
 
-def get_number_without_context(question, llm_router, image_data=None):
-   messages = [
-       {
-           "role": "user",
-           "content": f"""{question}"""
-       }
-   ]
-
-   response = llm_router.generate(
-       model="claude-3-haiku-20240307",
-       max_tokens=5,
-       messages=messages,
-       temperature=0.7,
-       top_p=0.9,
-       stop_sequences=["User:", "Human:", "Assistant:"],
-       image_data=image_data,
-       system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option. **ONLY IF IT IS INDICATED** there can be several correct answers, only in that case you must respond with several letters or questions, **unless explictly stated**, answe only one option. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ..."
-   )
-
-   # Extracting just the number from the response
-   answer_text = response
-   print(f"MCQ answer without context: {answer_text}")
-   return answer_text
-
-
-def get_answer_with_image(question, llm_router, image_data=None):
+async def get_answer_with_image(question, llm_router, image_data=None):
    messages = [
        {
            "role": "user",
@@ -461,8 +437,8 @@ def get_answer_with_image(question, llm_router, image_data=None):
        }
    ]
 
-   response = llm_router.generate(
-       model="claude-3-haiku-20240307",
+   response = await llm_router.generate(
+       model="gemini-1.5-flash",
        max_tokens=475,
        messages=messages,
        temperature=0.7,
@@ -476,7 +452,7 @@ def get_answer_with_image(question, llm_router, image_data=None):
    return answer_text
 
 
-def get_answer_without_context(question, llm_router, image_data=None):
+async def get_answer_without_context(question, llm_router, image_data=None):
    messages = [
        {
            "role": "user",
@@ -484,8 +460,8 @@ def get_answer_without_context(question, llm_router, image_data=None):
        }
    ]
 
-   response = llm_router.generate(
-       model="claude-3-haiku-20240307",
+   response = await llm_router.generate(
+       model="gemini-1.5-pro",
        max_tokens=650,
        messages=messages,
        temperature=0.7,
@@ -499,6 +475,28 @@ def get_answer_without_context(question, llm_router, image_data=None):
    answer_text = response
    return answer_text
 
+async def get_number_without_context(question, llm_router, image_data=None):
+   messages = [
+       {
+           "role": "user",
+           "content": question
+       }
+   ]
+
+   response = await llm_router.generate(
+       model="gemini-1.5-pro",
+       max_tokens=2,
+       messages=messages,
+       temperature=0.7,
+       top_p=0.9,
+       stop_sequences=["User:", "Human:", "Assistant:"],
+       image_data=image_data,
+       system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option. **ONLY IF IT IS INDICATED** there can be several correct answers, only in that case you must respond with several letters or questions, **unless explictly stated**, answe only one option. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ..."
+   )
+
+   # Extracting the answer text from the response
+   answer_text = response
+   return answer_text
 
 def check_and_modify_mcq_format_flexible(text):
    """

@@ -1,154 +1,77 @@
-import os
-import sys
-import time
-import threading
+import asyncio
 import logging
-from typing import Optional, Dict, Any
-from dataclasses import dataclass
-from enum import Enum, auto
+from platform_interface import IconState
 
 logger = logging.getLogger(__name__)
 
-class ProgressState(Enum):
-    """Progress indicator states."""
-    IDLE = auto()
-    WORKING = auto()
-    SUCCESS = auto()
-    ERROR = auto()
-    WARNING = auto()
-
-@dataclass
-class ProgressInfo:
-    """Progress information."""
-    message: str
-    state: ProgressState
-    progress: float = 0.0
-    details: Optional[str] = None
-
 class ProgressIndicator:
-    """Cross-platform progress indicator."""
-    
     def __init__(self, app):
         self.app = app
-        self._state = ProgressState.IDLE
-        self._message = ""
-        self._progress = 0.0
-        self._details = None
-        self._lock = threading.Lock()
-        self._animation_thread = None
-        self._stop_animation = threading.Event()
-        
-        # Platform-specific icons
-        self.icons = {
-            ProgressState.IDLE: "🔄",
-            ProgressState.WORKING: "⚡",
-            ProgressState.SUCCESS: "✅",
-            ProgressState.ERROR: "❌",
-            ProgressState.WARNING: "⚠️"
-        }
-        
-        # Animation frames
-        self.animation_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        
-    def update(
-        self,
-        state: ProgressState,
-        message: str,
-        progress: float = 0.0,
-        details: Optional[str] = None
-    ) -> None:
-        """Update progress indicator."""
-        with self._lock:
-            self._state = state
-            self._message = message
-            self._progress = max(0.0, min(1.0, progress))
-            self._details = details
-            self._update_display()
+        self._is_running = False
+        self._current_text = None
+        self._current_state = IconState.IDLE
+        self._task = None
     
-    def _update_display(self) -> None:
-        """Update the display based on platform."""
+    def start(self, text: str = None, state: IconState = IconState.WORKING):
+        """Start showing progress animation."""
+        self._is_running = True
+        self._current_text = text
+        self._current_state = state
+        if not self._task:
+            self._task = asyncio.create_task(self._update_progress())
+    
+    def stop(self, success: bool = True):
+        """Stop showing progress animation."""
+        self._is_running = False
+        if success:
+            self.app.platform.update_icon(IconState.SUCCESS, self._current_text)
+        else:
+            self.app.platform.update_icon(IconState.ERROR, self._current_text)
+        self._current_text = None
+        self._current_state = IconState.IDLE
+        if self._task:
+            self._task.cancel()
+            self._task = None
+    
+    def set_warning(self, text: str = None):
+        """Show warning state."""
+        self._is_running = False
+        self.app.platform.update_icon(IconState.WARNING, text)
+        self._current_text = text
+        self._current_state = IconState.WARNING
+    
+    def set_error(self, text: str = None):
+        """Show error state."""
+        self._is_running = False
+        self.app.platform.update_icon(IconState.ERROR, text)
+        self._current_text = text
+        self._current_state = IconState.ERROR
+    
+    def set_screenshot(self, text: str = None):
+        """Show screenshot state."""
+        self._is_running = True
+        self._current_text = text
+        self._current_state = IconState.SCREENSHOT
+        if not self._task:
+            self._task = asyncio.create_task(self._update_progress())
+    
+    def reset(self):
+        """Reset to idle state."""
+        self._is_running = False
+        self.app.platform.update_icon(IconState.IDLE)
+        self._current_text = None
+        self._current_state = IconState.IDLE
+        if self._task:
+            self._task.cancel()
+            self._task = None
+    
+    async def _update_progress(self):
+        """Update progress animation."""
         try:
-            if sys.platform == 'darwin':
-                self._update_macos_display()
-            else:
-                self._update_windows_display()
+            while self._is_running:
+                self.app.platform.update_icon(self._current_state, self._current_text)
+                await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
-            logger.error(f"Error updating display: {e}")
-    
-    def _update_macos_display(self) -> None:
-        """Update macOS menu bar display."""
-        icon = self.icons[self._state]
-        if self._state == ProgressState.WORKING:
-            # Start animation for working state
-            if not self._animation_thread or not self._animation_thread.is_alive():
-                self._stop_animation.clear()
-                self._animation_thread = threading.Thread(target=self._animate_progress)
-                self._animation_thread.daemon = True
-                self._animation_thread.start()
-        else:
-            # Stop animation if running
-            if self._animation_thread and self._animation_thread.is_alive():
-                self._stop_animation.set()
-                self._animation_thread.join()
-            
-            # Update static display
-            display_text = f"Clipbrd: {icon} {self._message}"
-            if self._progress > 0:
-                display_text += f" ({int(self._progress * 100)}%)"
-            self.app.update_icon(display_text)
-    
-    def _update_windows_display(self) -> None:
-        """Update Windows system tray display."""
-        icon = self.icons[self._state]
-        if self._state == ProgressState.WORKING:
-            if not self._animation_thread or not self._animation_thread.is_alive():
-                self._stop_animation.clear()
-                self._animation_thread = threading.Thread(target=self._animate_progress)
-                self._animation_thread.daemon = True
-                self._animation_thread.start()
-        else:
-            if self._animation_thread and self._animation_thread.is_alive():
-                self._stop_animation.set()
-                self._animation_thread.join()
-            
-            display_text = f"Clipbrd: {icon} {self._message}"
-            if self._progress > 0:
-                display_text += f" ({int(self._progress * 100)}%)"
-            self.app.update_icon(display_text)
-    
-    def _animate_progress(self) -> None:
-        """Animate progress indicator."""
-        frame_index = 0
-        while not self._stop_animation.is_set():
-            frame = self.animation_frames[frame_index]
-            display_text = f"Clipbrd: {frame} {self._message}"
-            if self._progress > 0:
-                display_text += f" ({int(self._progress * 100)}%)"
-            self.app.update_icon(display_text)
-            
-            frame_index = (frame_index + 1) % len(self.animation_frames)
-            time.sleep(0.1)
-    
-    def start_progress(self, message: str) -> None:
-        """Start progress indication."""
-        self.update(ProgressState.WORKING, message)
-    
-    def update_progress(self, progress: float, details: Optional[str] = None) -> None:
-        """Update progress value."""
-        self.update(ProgressState.WORKING, self._message, progress, details)
-    
-    def complete_progress(self, message: Optional[str] = None) -> None:
-        """Complete progress with success."""
-        self.update(ProgressState.SUCCESS, message or "Done")
-    
-    def error_progress(self, message: str) -> None:
-        """Show error in progress."""
-        self.update(ProgressState.ERROR, message)
-    
-    def warning_progress(self, message: str) -> None:
-        """Show warning in progress."""
-        self.update(ProgressState.WARNING, message)
-    
-    def reset(self) -> None:
-        """Reset progress indicator."""
-        self.update(ProgressState.IDLE, "Ready") 
+            logger.error(f"Error updating progress: {e}") 
