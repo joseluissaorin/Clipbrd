@@ -9,10 +9,14 @@ from enum import Enum, auto
 import time
 import queue
 import threading
+import winsound
+from pynput import keyboard
+from screenshot import ScreenshotType
 
 logger = logging.getLogger(__name__)
 
 class IconState(Enum):
+    """Types of icon states available."""
     IDLE = auto()
     WORKING = auto()
     SUCCESS = auto()
@@ -28,6 +32,7 @@ class PlatformConfig:
     icon_path: str = "assets\icons\clipbrd_windows.ico"
     menu_items: Dict[str, Callable] = None
     debug_mode: bool = False
+    notification_sound: bool = False
 
 class PlatformInterface(abc.ABC):
     """Abstract base class for platform-specific implementations."""
@@ -102,6 +107,7 @@ class WindowsPlatform(PlatformInterface):
         from PIL import Image
         import queue
         import threading
+        import winsound
         self.pystray = pystray
         self.Image = Image
         self.icon = None
@@ -116,12 +122,37 @@ class WindowsPlatform(PlatformInterface):
             IconState.SCREENSHOT: "📸",
             IconState.MCQ_ANSWER: None  # Will be handled specially with text
         }
+        self.screenshot_callback = None
+        self.notification_sounds = {
+            "screenshot": (800, 200),  # Frequency, Duration
+            "success": (1000, 200),
+            "error": (400, 400)
+        }
+        self.main_loop = None
         self.logger.info("WindowsPlatform initialized")
+    
+    def play_sound(self, sound_type: str) -> None:
+        """Play a notification sound."""
+        try:
+            if self.config.notification_sound and sound_type in self.notification_sounds:
+                freq, duration = self.notification_sounds[sound_type]
+                winsound.Beep(freq, duration)
+        except Exception as e:
+            self.logger.error(f"Failed to play sound: {e}")
+    
+    def set_screenshot_callback(self, callback: Callable) -> None:
+        """Set the callback for screenshot button."""
+        self.screenshot_callback = callback
+        self.setup_menu()  # Refresh menu with new callback
+        self.logger.debug("Screenshot callback set and menu updated")
     
     def initialize(self) -> bool:
         """Initialize Windows platform."""
         try:
             self.logger.info("Initializing Windows platform...")
+            # Store the main event loop
+            self.main_loop = asyncio.get_event_loop()
+            
             # Load the default icon for initialization
             icon_image = self.Image.open(self.config.icon_path)
             self.logger.debug(f"Loaded initial icon from {self.config.icon_path}")
@@ -178,6 +209,15 @@ class WindowsPlatform(PlatformInterface):
         try:
             self.logger.debug(f"Queueing icon update: state={state}, text={text}")
             self.icon_update_queue.put((state, text))
+            
+            # Play appropriate sound based on state
+            if state == IconState.SCREENSHOT:
+                self.play_sound("screenshot")
+            elif state == IconState.SUCCESS:
+                self.play_sound("success")
+            elif state == IconState.ERROR:
+                self.play_sound("error")
+                
         except Exception as e:
             self.logger.error(f"Failed to queue icon update: {e}", exc_info=True)
     
@@ -219,23 +259,169 @@ class WindowsPlatform(PlatformInterface):
     def setup_menu(self) -> None:
         """Setup Windows system tray menu."""
         try:
-            if self.icon and self.config.menu_items:
+            if self.icon:
                 menu_items = []
-                for label, callback in self.config.menu_items.items():
+                
+                # Add screenshot button with proper async handling
+                if self.screenshot_callback:
                     menu_items.append(
-                        self.pystray.MenuItem(label, callback)
+                        self.pystray.MenuItem(
+                            "Take Screenshot",
+                            self._handle_screenshot_sync
+                        )
                     )
+                
+                # Add other menu items
+                if self.config.menu_items:
+                    for label, callback in self.config.menu_items.items():
+                        menu_items.append(
+                            self.pystray.MenuItem(label, callback)
+                        )
+                
                 self.icon.menu = self.pystray.Menu(*menu_items)
+                self.logger.debug("Menu setup completed with screenshot options")
         except Exception as e:
             self.logger.error(f"Failed to setup Windows menu: {e}")
     
-    def show_notification(self, title: str, message: str) -> None:
-        """Show Windows notification."""
+    def _handle_screenshot_sync(self, _=None) -> None:
+        """Synchronous wrapper for screenshot handling."""
+        try:
+            if not self.main_loop:
+                self.logger.error("Screenshot failed: Main event loop not initialized")
+                self.update_icon(IconState.ERROR)
+                self.show_notification(
+                    "Screenshot Error",
+                    "Application not properly initialized"
+                )
+                return
+
+            self.logger.info("Starting screenshot operation in platform interface")
+            # Schedule the coroutine in the main loop
+            self.logger.debug("Scheduling screenshot coroutine in main event loop")
+            future = asyncio.run_coroutine_threadsafe(
+                self._handle_screenshot("full"),
+                self.main_loop
+            )
+            
+            # Wait for the result with a timeout
+            try:
+                self.logger.debug("Waiting for screenshot operation to complete")
+                future.result(timeout=10)  # 10 seconds timeout
+                self.logger.info("Screenshot operation completed successfully")
+            except TimeoutError:
+                self.logger.error("Screenshot operation timed out after 10 seconds")
+                self.update_icon(IconState.ERROR)
+                self.show_notification(
+                    "Screenshot Error",
+                    "Operation timed out"
+                )
+                # Return to idle state after error
+                self.main_loop.call_soon_threadsafe(
+                    lambda: self.update_icon(IconState.IDLE)
+                )
+            except Exception as e:
+                self.logger.error(f"Screenshot operation failed: {e}", exc_info=True)
+                self.logger.debug("Operation details:", extra={
+                    "has_main_loop": bool(self.main_loop),
+                    "has_callback": bool(self.screenshot_callback),
+                    "error_type": type(e).__name__
+                })
+                self.update_icon(IconState.ERROR)
+                self.show_notification(
+                    "Screenshot Error",
+                    f"Failed to take screenshot: {str(e)}"
+                )
+                # Return to idle state after error
+                self.main_loop.call_soon_threadsafe(
+                    lambda: self.update_icon(IconState.IDLE)
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error in screenshot handling: {e}", exc_info=True)
+            self.update_icon(IconState.ERROR)
+            self.show_notification(
+                "Screenshot Error",
+                f"Failed to take screenshot: {str(e)}"
+            )
+            # Return to idle state after error
+            if self.main_loop:
+                self.main_loop.call_soon_threadsafe(
+                    lambda: self.update_icon(IconState.IDLE)
+                )
+            self.logger.info("Screenshot operation completed with errors")
+    
+    def show_notification(self, title: str, message: str, image: Optional[str] = None) -> None:
+        """Show Windows notification with optional image preview."""
         try:
             if self.icon:
-                self.icon.notify(title=title, message=message)
+                if image:
+                    # Convert base64 image to PIL Image for preview
+                    import base64
+                    import io
+                    image_data = base64.b64decode(image)
+                    image_preview = self.Image.open(io.BytesIO(image_data))
+                    # Resize image for notification
+                    image_preview.thumbnail((256, 256))
+                    self.icon.notify(title=title, message=message, icon=image_preview)
+                else:
+                    self.icon.notify(title=title, message=message)
         except Exception as e:
             self.logger.error(f"Failed to show Windows notification: {e}")
+    
+    async def _handle_screenshot(self, screenshot_type: str) -> None:
+        """Handle screenshot action with proper feedback."""
+        try:
+            self.update_icon(IconState.SCREENSHOT)
+            
+            if self.screenshot_callback:
+                # Create task in the main event loop
+                if asyncio.iscoroutinefunction(self.screenshot_callback):
+                    await self.screenshot_callback(screenshot_type)
+                else:
+                    await asyncio.to_thread(self.screenshot_callback, screenshot_type)
+                    
+                # Only show notification without changing icon state
+                self.play_sound("success")
+                self.show_notification(
+                    "Screenshot Captured",
+                    f"{screenshot_type.title()} screenshot taken successfully"
+                )
+            else:
+                self.update_icon(IconState.ERROR)
+                self.play_sound("error")
+                self.show_notification(
+                    "Screenshot Error",
+                    "Screenshot functionality not available"
+                )
+                # Return to idle state after 2 seconds
+                await asyncio.sleep(2)
+                self.update_icon(IconState.IDLE)
+        except Exception as e:
+            self.logger.error(f"Screenshot error: {e}")
+            self.update_icon(IconState.ERROR)
+            self.play_sound("error")
+            self.show_notification(
+                "Screenshot Error",
+                f"Failed to take screenshot: {str(e)}"
+            )
+            # Return to idle state after 2 seconds
+            await asyncio.sleep(2)
+            self.update_icon(IconState.IDLE)
+    
+    def _setup_shortcut(self, shortcut_key: str, screenshot_type: ScreenshotType) -> None:
+        """Setup a single keyboard shortcut."""
+        try:
+            def on_activate():
+                # Create task in the event loop
+                loop = asyncio.get_event_loop()
+                loop.create_task(self._handle_screenshot(screenshot_type))
+
+            hotkey = keyboard.GlobalHotKeys({shortcut_key: on_activate})
+            hotkey.start()
+            self.hotkey_listeners[shortcut_key] = hotkey
+            logger.debug(f"Shortcut {shortcut_key} set up for {screenshot_type.name}")
+        except Exception as e:
+            logger.error(f"Error setting up shortcut {shortcut_key}: {e}")
     
     def cleanup(self) -> None:
         """Cleanup Windows resources."""

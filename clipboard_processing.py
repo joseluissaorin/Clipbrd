@@ -14,6 +14,7 @@ from question_processing import (get_answer_with_context, get_answer_without_con
                                get_number_without_context, is_formatted_question)
 from platform_interface import IconState
 from license_manager import LicenseManager
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,14 @@ class ClipboardProcessor:
         self._setup_caches()
         self._initial_content = None
         self.last_processed_content = None
+        self.screenshot = None  # Store the latest screenshot
+        self.logger = logging.getLogger('ClipboardProcessor')
+        self.search = None
+        self.inverted_index = None
+        self.documents = None  # Add documents attribute
+        self.platform = None
+        self.last_content = None
+        self.processing = False
         # Initialize immediately in constructor
         self.initialize()
         logger.info("ClipboardProcessor initialized")
@@ -123,17 +132,47 @@ class ClipboardProcessor:
 
     def _validate_app_requirements(self, app) -> bool:
         """Validate that the app has all required attributes for processing."""
-        required_attrs = ['llm_router', 'search', 'inverted_index', 'documents']
+        required_attrs = ['llm_router']
         missing_attrs = [attr for attr in required_attrs if not hasattr(app, attr) or getattr(app, attr) is None]
         
         if missing_attrs:
             logger.debug(f"App missing required attributes: {missing_attrs}")
             return False
+
+        # Check for document processing components but don't require them
+        has_search = hasattr(app, 'search') and app.search is not None
+        has_index = hasattr(app, 'inverted_index') and app.inverted_index is not None
+        has_documents = hasattr(app, 'documents') and isinstance(app.documents, list)
+        
+        # Log component availability
+        logger.debug(f"Document processing components available - Search: {has_search}, Index: {has_index}, Documents: {has_documents}")
+        
         return True
+
+    def _has_context_components(self) -> bool:
+        """Check if all required components for context-based processing are available."""
+        has_search = self.search is not None and callable(self.search)
+        has_index = self.inverted_index is not None and hasattr(self.inverted_index, 'search')
+        has_documents = isinstance(self.documents, list) and len(self.documents) > 0
+        
+        logger.debug(f"Context components check - Search: {has_search}, Index: {has_index}, Documents: {has_documents}")
+        
+        if not has_search:
+            logger.debug("Search function not available or not callable")
+        if not has_index:
+            logger.debug("Inverted index not available or missing search attribute")
+        if not has_documents:
+            logger.debug("Documents not available or empty")
+        
+        return has_search and has_index and has_documents
 
     async def process_clipboard(self, app) -> None:
         """Process clipboard content with rate limiting and caching."""
+        if self.processing:
+            return  # Skip if already processing
+
         try:
+            self.processing = True
             # Rate limiting
             current_time = time.time()
             time_since_last = current_time - self.last_process_time
@@ -199,6 +238,8 @@ class ClipboardProcessor:
         except Exception as e:
             logger.error(f"Error processing clipboard: {e}")
             app.update_icon(IconState.ERROR)
+        finally:
+            self.processing = False
 
     async def _process_question(self, text: str, app) -> tuple[bool, str]:
         """Process question with caching."""
@@ -210,21 +251,95 @@ class ClipboardProcessor:
 
     async def process_screenshot(self, app) -> None:
         """Process screenshot with error handling."""
+        if not self.screenshot:
+            self.logger.warning("No screenshot data to process")
+            return
+
+        if self.processing:
+            self.logger.warning("Screenshot processing already in progress")
+            return
+
+        self.processing = True
         try:
-            if app.screenshot is None:
-                app.update_icon(IconState.IDLE)
-                return
+            app.update_icon(IconState.WORKING)
+            self.logger.info("Starting screenshot processing")
+            app.debug_info.append("Processing screenshot")
 
-            logger.info("Processing screenshot")
-            app.update_icon(IconState.SCREENSHOT)
-            base64_image = app.screenshot
+            # Check if it's a question with an image
+            self.logger.info("Checking if screenshot contains a question with image")
+            has_image = await is_question_with_image(self.screenshot, app.llm_router)
+            self.logger.info(f"Image detection result: {has_image}")
 
-            await self._process_text_from_image(app, base64_image)
-            app.screenshot = None
+            if has_image:
+                self.logger.info("Question with image detected")
+                await self._process_image_question(app, self.screenshot)
+            else:
+                self.logger.info("Extracting question from OCR text")
+                question = await extract_question_from_ocr(self.screenshot, app.llm_router)
+                if question:
+                    self.logger.info("Question extracted successfully")
+                    app.debug_info.append(f"Extracted question: {question[:200]}")
+                    
+                    # Split into non-empty lines
+                    lines = [line.strip() for line in question.split('\n') if line.strip()]
+                    
+                    # More flexible MCQ detection:
+                    # 1. Check for common option patterns
+                    option_patterns = [
+                        r'^[a-dA-D][\s\.\)]\s*\w+',  # a) b) c) d) or A. B. C. D.
+                        r'^[1-9][\s\.\)]\s*\w+',     # 1) 2) 3) or 1. 2. 3.
+                        r'^\([a-dA-D]\)\s*\w+',      # (a) (b) (c) (d)
+                        r'^\([1-9]\)\s*\w+'          # (1) (2) (3)
+                    ]
+                    
+                    # Count lines that match option patterns
+                    option_count = sum(1 for line in lines[1:] 
+                                     if any(re.match(pattern, line) for pattern in option_patterns))
+                    
+                    # Also check for simple options (short lines after the question)
+                    short_lines = sum(1 for line in lines[1:] if len(line) < 100)
+                    
+                    # Consider it MCQ if:
+                    # - We have 2+ lines matching option patterns, OR
+                    # - We have 2+ short lines after a question
+                    is_mcq = (option_count >= 2) or (len(lines) > 2 and short_lines >= 2)
+                    
+                    self.logger.info(f"MCQ detection - Option matches: {option_count}, Short lines: {short_lines}")
+                    
+                    if is_mcq:
+                        self.logger.info("Processing as MCQ question")
+                        await self._process_mcq(app, question)
+                    else:
+                        self.logger.info("Processing as long-answer question")
+                        await self._process_non_mcq(app, question)
+                else:
+                    self.logger.warning("No question could be extracted from OCR text")
+                    app.update_icon(IconState.ERROR)
+                    await asyncio.sleep(2)  # Show error state briefly
+                    app.update_icon(IconState.IDLE)
+
+            self.logger.info("Screenshot processing completed successfully")
 
         except Exception as e:
-            logger.error(f"Error processing screenshot: {e}")
+            self.logger.error(f"Error processing screenshot: {e}", exc_info=True)
+            app.debug_info.append({
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
             app.update_icon(IconState.ERROR)
+            app.debug_info.append(f"Screenshot processing failed: {str(e)}")
+            await asyncio.sleep(2)  # Show error state briefly
+            app.update_icon(IconState.IDLE)
+            self.logger.info("Screenshot processing completed with errors")
+        finally:
+            self.processing = False
+            self.screenshot = None  # Clear the screenshot after processing
+            self.logger.debug("Screenshot processing resources cleaned up")
+
+    def set_screenshot(self, screenshot_data: str) -> None:
+        """Set screenshot data for processing."""
+        self.screenshot = screenshot_data
+        self.logger.debug("Screenshot data set for processing")
 
     async def _process_image_question(self, app, base64_image: str) -> None:
         """Process image-based question with error handling."""
@@ -252,24 +367,29 @@ class ClipboardProcessor:
         try:
             base64_image_url = f"data:image/png;base64,{base64_image}"
             
-            # Try primary OCR
+            # Try direct OCR first
+            logger.info("Attempting direct OCR")
             extracted_text = await asyncio.get_event_loop().run_in_executor(
-                None, extract_question_from_ocr, base64_image, app.llm_router
+                None, ocr_image, base64_image
             )
             
-            # Fallback OCR
-            if not extracted_text:
+            # If direct OCR fails or returns low-quality text, try OCR with LLM
+            if not extracted_text or len(extracted_text.strip().split()) < 5:
+                logger.info("Direct OCR failed or returned low-quality text, trying OCR with LLM")
                 extracted_text = await asyncio.get_event_loop().run_in_executor(
-                    None, ocr_image, base64_image
+                    None, extract_question_from_ocr, base64_image, app.llm_router
                 )
             
             if not extracted_text:
                 raise ValueError("Failed to extract text from image")
             
+            logger.info(f"Successfully extracted text from image: {extracted_text[:200]}...")
             app.debug_info.append(f"Extracted Text: {extracted_text}")
-            is_mcq, clipboard = await self._process_question(extracted_text, app)
             
+            # Process the extracted text
+            is_mcq, clipboard = await self._process_question(extracted_text, app)
             app.debug_info.append(f"MCQ detected: {is_mcq}")
+            
             if is_mcq:
                 await self._process_mcq(app, clipboard)
             else:
@@ -277,44 +397,77 @@ class ClipboardProcessor:
 
         except Exception as e:
             logger.error(f"Error processing text from image: {e}")
-            app.update_icon("Clipbrd: Error")
+            app.update_icon(IconState.ERROR)
+            app.debug_info.append(f"Screenshot processing error: {str(e)}")
 
     async def _process_mcq(self, app, text: str) -> None:
         """Process MCQ with error handling and caching."""
         try:
             logger.info(f"Starting MCQ processing with text length: {len(text)}")
-            app.update_icon(IconState.WORKING)  # Start with WORKING state
-            # Try with context first
-            answer_number = None
-            if app.search and app.inverted_index and app.documents:
-                logger.info("Attempting to get answer with context")
-                answer_number = await asyncio.get_event_loop().run_in_executor(
-                    None, get_number_with_context,
-                    text, app.llm_router, app.search, app.inverted_index, app.documents
-                )
-                logger.info(f"Answer with context result: {answer_number}")
-            else:
-                logger.info("Skipping context-based answer (missing components)")
+            logger.info(f"MCQ text content: {text[:500]}...")
+            app.update_icon(IconState.WORKING)
             
-            # Fallback to without context
+            # Check for context components
+            has_context = self._has_context_components()
+            logger.info(f"Context-based processing available: {has_context}")
+            
+            # Try with context first if components are available
+            answer_number = None
+            if has_context:
+                logger.info("Attempting to get answer with context")
+                try:
+                    # Use local components instead of app components
+                    answer_number = await asyncio.wait_for(
+                        get_number_with_context(
+                            text, app.llm_router, self.search, self.inverted_index, self.documents
+                        ),
+                        timeout=30.0
+                    )
+                    logger.info(f"Answer with context result: {answer_number}")
+                except asyncio.TimeoutError:
+                    logger.error("Context-based answer timed out")
+                    answer_number = None
+                except Exception as context_error:
+                    logger.error(f"Error getting context-based answer: {context_error}")
+                    answer_number = None
+            else:
+                logger.info("Skipping context-based answer - components not available")
+                logger.debug(f"Search type: {type(self.search)}")
+                logger.debug(f"Index type: {type(self.inverted_index)}")
+                logger.debug(f"Documents length: {len(self.documents) if isinstance(self.documents, list) else 'N/A'}")
+
+            # Fallback to without context if needed
             if answer_number is None:
                 logger.info("Attempting to get answer without context")
-                answer_number = await get_number_without_context(text, app.llm_router)
-                logger.info(f"Answer without context result: {answer_number}")
+                try:
+                    answer_number = await asyncio.wait_for(
+                        get_number_without_context(text, app.llm_router),
+                        timeout=30.0
+                    )
+                    logger.info(f"Answer without context result: {answer_number}")
+                except asyncio.TimeoutError:
+                    logger.error("Non-context answer timed out")
+                    answer_number = None
+                except Exception as no_context_error:
+                    logger.error(f"Error getting non-context answer: {no_context_error}")
+                    answer_number = None
             
             if answer_number is not None:
-                app.update_icon(IconState.MCQ_ANSWER, str(answer_number))  # Pass the answer as text
+                logger.info(f"Processing successful, updating UI with answer: {answer_number}")
+                app.update_icon(IconState.MCQ_ANSWER, text=answer_number)
                 app.debug_info.append(f"MCQ answer: {answer_number}")
                 app.last_clipboard = text
-                logger.info(f"MCQ processed successfully, answer: {answer_number}")
             else:
+                logger.error("Failed to get MCQ answer")
                 app.update_icon(IconState.ERROR)
-                logger.error("Failed to get MCQ answer: answer_number is None")
+                await asyncio.sleep(2)
+                app.update_icon(IconState.IDLE)
 
         except Exception as e:
-            logger.error(f"Error processing MCQ: {str(e)}", exc_info=True)
-            logger.error(f"MCQ text that caused error: {text[:200]}...")  # Log first 200 chars of problematic text
+            logger.error(f"Unexpected error in _process_mcq: {e}", exc_info=True)
             app.update_icon(IconState.ERROR)
+            await asyncio.sleep(2)
+            app.update_icon(IconState.IDLE)
 
     async def _process_non_mcq(self, app, text: str) -> None:
         """Process non-MCQ with error handling and caching."""
@@ -350,3 +503,8 @@ class ClipboardProcessor:
         except Exception as e:
             logger.error(f"Error processing non-MCQ: {e}", exc_info=True)
             app.update_icon(IconState.ERROR)
+
+    def set_platform(self, platform):
+        """Set the platform interface for UI updates."""
+        self.platform = platform
+        self.logger.debug("Platform interface set")

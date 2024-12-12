@@ -5,11 +5,71 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from PIL import Image, ImageTk
 from license_manager import LicenseManager
+from glob import glob
+import subprocess
+import platform
+from screenshot import load_shortcuts, save_shortcuts
 
 logger = logging.getLogger(__name__)
+
+def get_default_documents_folder() -> str:
+    """Get the default documents folder with fallbacks for different systems and languages."""
+    # Try standard Documents folder
+    documents_folder = os.path.expanduser("~/Documents")
+    if os.path.exists(documents_folder):
+        return os.path.join(documents_folder, "Clipbrd")
+    
+    # Try Windows with OneDrive
+    onedrive_docs = glob(os.path.expanduser("~\\*\\Documents"))
+    if onedrive_docs:
+        return os.path.join(onedrive_docs[0], "Clipbrd")
+    
+    # Try Spanish Windows with OneDrive
+    onedrive_docs_es = glob(os.path.expanduser("~\\*\\Documentos"))
+    if onedrive_docs_es:
+        return os.path.join(onedrive_docs_es[0], "Clipbrd")
+    
+    # Try macOS
+    macos_docs = os.path.expanduser("~/Library/Documents")
+    if os.path.exists(macos_docs):
+        return os.path.join(macos_docs, "Clipbrd")
+    
+    # Try Spanish language systems
+    spanish_docs = os.path.expanduser("~/Documentos")
+    if os.path.exists(spanish_docs):
+        return os.path.join(spanish_docs, "Clipbrd")
+    
+    # Fallback to home directory
+    return os.path.join(os.path.expanduser("~"), "Clipbrd")
+
+def ensure_clipbrd_folder(path: str) -> str:
+    """Ensure the path ends with Clipbrd and the folder exists."""
+    if not path.endswith("Clipbrd"):
+        path = os.path.join(path, "Clipbrd")
+    
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Error creating Clipbrd folder: {e}")
+    
+    return path
+
+def open_folder_in_explorer(path: str):
+    """Open the specified folder in the system's default file explorer."""
+    try:
+        if platform.system() == "Windows":
+            os.startfile(path)
+        elif platform.system() == "Darwin":  # macOS
+            subprocess.run(["open", path])
+        else:  # Linux
+            subprocess.run(["xdg-open", path])
+    except Exception as e:
+        logger.error(f"Error opening folder: {e}")
+        return False
+    return True
 
 @dataclass
 class AppSettings:
@@ -24,14 +84,15 @@ class AppSettings:
     startup_launch: bool = True
     max_debug_entries: int = 100
     language: str = "en"
+    documents_folder: str = get_default_documents_folder()
     
     def __post_init__(self):
         if self.shortcuts is None:
-            self.shortcuts = {
-                "full_screenshot": "<ctrl>+<shift>+f",
-                "region_screenshot": "<ctrl>+<shift>+r",
-                "toggle_debug": "<ctrl>+<shift>+d"
-            }
+            self.shortcuts = load_shortcuts()
+
+    def save_shortcuts(self):
+        """Save shortcuts to both settings and screenshot config."""
+        save_shortcuts(self.shortcuts)
 
 class SettingsManager:
     def __init__(self, app_data_dir: Optional[str] = None):
@@ -143,7 +204,7 @@ class SettingsManager:
         return value
 
     def show_dialog(self):
-        """Show settings dialog."""
+        """Show settings dialog with dynamic sizing."""
         # If window already exists, just focus it
         if self.settings_window is not None:
             try:
@@ -158,88 +219,72 @@ class SettingsManager:
         root = self.settings_window
         root.title("Clipbrd Settings")
         
+        # Define on_closing function at the start
+        def on_closing():
+            self.settings_window = None
+            root.destroy()
+            
+        # Set window close handler
+        root.protocol("WM_DELETE_WINDOW", on_closing)
+        
+        # Set window icon
+        icon_dir = os.path.join(os.path.dirname(__file__), 'assets', 'icons')
+        icon_path = os.path.join(icon_dir, 'clipbrd_windows.ico' if os.name == 'nt' else 'clipbrd_macos.png')
+        
+        if os.path.exists(icon_path):
+            try:
+                if os.name == 'nt':  # Windows
+                    root.iconbitmap(icon_path)
+                else:  # macOS/Linux
+                    img = Image.open(icon_path)
+                    photo = ImageTk.PhotoImage(img)
+                    root.iconphoto(True, photo)
+                    root.tk.call('wm', 'iconphoto', root._w, photo)
+            except Exception as e:
+                logger.error(f"Error setting window icon: {e}")
+        
         # Get screen dimensions
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
         
-        # Initial size (will be adjusted later)
-        window_width = min(int(screen_width * 0.4), 600)  # 40% of screen width, max 600px
-        window_height = min(int(screen_height * 0.6), 800)  # 60% of screen height, max 800px
+        # Create main container
+        main_container = ttk.Frame(root)
+        main_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
-        # Calculate position
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
-        
-        # Set initial geometry
-        root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        
-        # Make window resizable
-        root.resizable(True, True)
-        
-        # Configure grid weights
+        # Configure grid weights for root
         root.grid_columnconfigure(0, weight=1)
         root.grid_rowconfigure(0, weight=1)
+        
+        # Create notebook for tabs
+        notebook = ttk.Notebook(main_container)
+        notebook.grid(row=0, column=0, sticky="nsew")
+        
+        # Configure grid weights for main container
+        main_container.grid_columnconfigure(0, weight=1)
+        main_container.grid_rowconfigure(0, weight=1)
+        
+        # Create frames for each tab
+        general_frame = ttk.Frame(notebook)
+        notebook.add(general_frame, text="General")
+        
+        # Configure grid weights for frames
+        general_frame.grid_columnconfigure(1, weight=1)
 
-        # Handle window close event
-        def on_closing():
-            try:
-                self.settings_window = None
-                root.destroy()
-            except Exception as e:
-                logger.error(f"Error closing settings window: {e}")
-                try:
-                    root.destroy()
-                except:
-                    pass
-
-        root.protocol("WM_DELETE_WINDOW", on_closing)
-
-        # Set window icon
-        icon_path = os.path.join(os.path.dirname(__file__), 'assets', 'icons', 
-                               'clipbrd_windows.ico' if os.name == 'nt' else 'clipbrd_macos.png')
-        if os.path.exists(icon_path):
-            if os.name == 'nt':
-                root.iconbitmap(icon_path)
-            else:
-                img = Image.open(icon_path)
-                photo = ImageTk.PhotoImage(img)
-                root.iconphoto(True, photo)
-
-        # Create main frame with scrolling capability
-        canvas = tk.Canvas(root)
-        scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
-        main_frame = ttk.Frame(canvas, padding="20")
+        # Screenshot shortcut in general settings
+        shortcut_frame = ttk.LabelFrame(general_frame, text="Screenshot", padding="10")
+        shortcut_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        shortcut_frame.grid_columnconfigure(1, weight=1)
         
-        # Configure scrolling
-        canvas.configure(yscrollcommand=scrollbar.set)
+        shortcut_label = ttk.Label(shortcut_frame, text="Full Screen Shortcut:")
+        shortcut_entry = ttk.Entry(shortcut_frame, width=20)
+        shortcut_entry.insert(0, self.settings.shortcuts.get("full_screenshot", "<ctrl>+<shift>+f"))
         
-        # Pack scrollbar and canvas
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        canvas.grid(row=0, column=0, sticky="nsew")
+        shortcut_label.grid(row=0, column=0, padx=(0,5), pady=5, sticky='w')
+        shortcut_entry.grid(row=0, column=1, padx=5, pady=5, sticky='w')
         
-        # Create window in canvas for main frame
-        canvas_window = canvas.create_window((0, 0), window=main_frame, anchor="nw")
-        
-        # Configure main frame grid
-        main_frame.grid_columnconfigure(0, weight=1)
-        
-        # Update scroll region when main frame size changes
-        def configure_scroll_region(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-            # Update canvas window width to match canvas width
-            canvas.itemconfig(canvas_window, width=canvas.winfo_width())
-        
-        main_frame.bind("<Configure>", configure_scroll_region)
-        
-        # Handle mouse wheel scrolling
-        def on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-
         # License Frame
-        license_frame = ttk.LabelFrame(main_frame, text="License", padding="10")
-        license_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 20))
+        license_frame = ttk.LabelFrame(general_frame, text="License", padding="10")
+        license_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 20))
 
         # License Status
         license_manager = LicenseManager()
@@ -313,8 +358,8 @@ class SettingsManager:
         refresh_license_frame()
 
         # Settings Frame
-        settings_frame = ttk.LabelFrame(main_frame, text="Settings", padding="10")
-        settings_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        settings_frame = ttk.LabelFrame(general_frame, text="Settings", padding="10")
+        settings_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
         settings_frame.grid_columnconfigure(0, weight=1)
 
         # Debug Mode and Log Viewer
@@ -398,18 +443,62 @@ class SettingsManager:
         lang_combo = ttk.Combobox(settings_frame, textvariable=lang_var, values=["en", "es", "fr", "de"], state="readonly")
         lang_combo.grid(row=4, column=1, sticky=tk.W, pady=5)
 
+        # Document Folder Selection
+        folder_frame = ttk.Frame(settings_frame)
+        folder_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        folder_frame.grid_columnconfigure(1, weight=1)
+        
+        ttk.Label(folder_frame, text="Documents Folder:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        folder_var = tk.StringVar(value=self.settings.documents_folder)
+        folder_entry = ttk.Entry(folder_frame, textvariable=folder_var, state="readonly")
+        folder_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
+        
+        def browse_folder():
+            folder = filedialog.askdirectory(initialdir=folder_var.get())
+            if folder:
+                folder = ensure_clipbrd_folder(folder)
+                folder_var.set(folder)
+        
+        button_frame = ttk.Frame(folder_frame)
+        button_frame.grid(row=0, column=2)
+        
+        ttk.Button(button_frame, text="Browse", command=browse_folder).grid(row=0, column=0, padx=2)
+        
+        def open_current_folder():
+            current_folder = folder_var.get()
+            if not os.path.exists(current_folder):
+                try:
+                    os.makedirs(current_folder, exist_ok=True)
+                except Exception as e:
+                    messagebox.showerror("Error", f"Could not create folder: {e}")
+                    return
+            if not open_folder_in_explorer(current_folder):
+                messagebox.showerror("Error", "Could not open the folder.")
+        
+        ttk.Button(button_frame, text="Open", command=open_current_folder).grid(row=0, column=1, padx=2)
+
         def save_settings():
             try:
                 self.settings.debug_mode = debug_var.get()
                 self.settings.notification_sound = notif_sound_var.get()
                 self.settings.minimize_to_tray = minimize_var.get()
                 self.settings.language = lang_var.get()
+                self.settings.documents_folder = folder_var.get()
+                
+                # Save screenshot shortcut
+                new_shortcuts = {"full_screenshot": shortcut_entry.get()}
+                self.settings.shortcuts = new_shortcuts
+                save_shortcuts(new_shortcuts)
+                
                 self.save_settings()
+                messagebox.showinfo("Success", "Settings saved successfully!")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save settings: {e}")
             finally:
                 on_closing()
 
         # Save Button
-        ttk.Button(main_frame, text="Save", command=save_settings).grid(row=2, column=0, pady=20)
+        ttk.Button(general_frame, text="Save", command=save_settings).grid(row=3, column=0, pady=20)
 
         try:
             root.mainloop()

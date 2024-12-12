@@ -19,3 +19,6 @@ macos_app.py
 windows_app.py
 website_content.md
 docs/
+changelog.md
+codebase-knowledge.md
+test_llm.py

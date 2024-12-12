@@ -6,13 +6,14 @@ import logging
 from typing import Dict, Callable, Optional
 from dotenv import load_dotenv
 
-from platform_interface import PlatformConfig, create_platform_interface
+from platform_interface import PlatformConfig, create_platform_interface, IconState
 from settings_manager import SettingsManager
 from dependency_manager import DependencyManager
 from clipboard_processing import ClipboardProcessor
 from license_manager import LicenseManager
 from llmrouter import LLMRouter
 from document_processing import process_documents
+from screenshot import ScreenshotManager, ScreenshotConfig, ScreenshotType
 
 # Load environment variables
 load_dotenv()
@@ -89,6 +90,12 @@ class Clipbrd:
                 self.logger.error("Failed to initialize platform interface")
                 return False
 
+            # Set up screenshot callback
+            self.platform.set_screenshot_callback(self.handle_screenshot)
+            
+            # Initialize screenshot shortcuts
+            self._setup_screenshot_shortcuts()
+
             # Check license before initializing components
             license_manager = LicenseManager()
             if not license_manager.is_license_valid():
@@ -106,13 +113,60 @@ class Clipbrd:
             )
 
             # Initialize document processing components
-            docs_folder = os.path.join(os.path.dirname(__file__), 'docs')
-            self.documents, self.inverted_index, stats = await process_documents(docs_folder)
-            self.search = self.inverted_index.search  # Use the search method directly
+            docs_folder = self.settings.get_setting('documents_folder')
+            if not os.path.exists(docs_folder):
+                os.makedirs(docs_folder, exist_ok=True)
             
-            # Initialize clipboard processor
+            # Exclude processed_files directory from document processing
+            exclude_patterns = ['processed_files/*', '**/processed_files/*']
+            
+            try:
+                documents, inverted_index, stats = await process_documents(docs_folder, exclude_patterns=exclude_patterns)
+                
+                # Initialize document processing components
+                if documents and len(documents) > 0:
+                    self.documents = documents
+                    self.inverted_index = inverted_index
+                    # Ensure inverted_index is properly initialized before getting search function
+                    if self.inverted_index and hasattr(self.inverted_index, 'search'):
+                        self.search = self.inverted_index.search
+                        self.logger.info("Search function successfully initialized")
+                    else:
+                        self.logger.error("Invalid inverted index or missing search function")
+                        self.search = None
+                        self.inverted_index = None
+                    self.logger.info(f"Successfully loaded {len(documents)} documents")
+                    self.logger.info(f"Document processing stats: {stats}")
+                    self.logger.debug(f"Search function type: {type(self.search) if self.search else 'None'}")
+                    self.logger.debug(f"Inverted index type: {type(self.inverted_index) if self.inverted_index else 'None'}")
+                else:
+                    self.logger.warning("No documents found in the specified folder")
+                    # Initialize empty components
+                    self.documents = []
+                    self.inverted_index = None
+                    self.search = None
+            except Exception as e:
+                self.logger.error(f"Error processing documents: {e}")
+                # Initialize empty components
+                self.documents = []
+                self.inverted_index = None
+                self.search = None
+            
+            # Initialize clipboard processor with search components
             self.clipboard = ClipboardProcessor()
             
+            # Pass the search components to the clipboard processor
+            if self.search and self.inverted_index:
+                self.logger.info("Passing initialized search components to clipboard processor")
+                self.clipboard.search = self.search
+                self.clipboard.inverted_index = self.inverted_index
+                self.clipboard.documents = self.documents
+            else:
+                self.logger.warning("Search components not available - clipboard processor will run without context")
+                self.clipboard.search = None
+                self.clipboard.inverted_index = None
+                self.clipboard.documents = self.documents if self.documents else []
+
             self.running = True
             self.logger.info("Application initialized successfully")
             return True
@@ -191,6 +245,8 @@ class Clipbrd:
             
             # Store the main event loop for cross-thread communication
             self.main_loop = asyncio.get_running_loop()
+            # Pass the main loop to platform interface
+            self.platform.main_loop = self.main_loop
             
             # Run platform interface in a separate thread
             import threading
@@ -224,7 +280,7 @@ class Clipbrd:
     def _run_platform_interface(self, ready_event):
         """Run the platform interface in a separate thread."""
         try:
-            # Signal that platform is ready to start using the stored main loop
+            # Signal that platform is ready to start
             asyncio.run_coroutine_threadsafe(
                 self._set_ready(ready_event),
                 self.main_loop
@@ -235,6 +291,75 @@ class Clipbrd:
         except Exception as e:
             self.logger.error(f"Error in platform interface: {e}")
             self.running = False
+
+    def _setup_screenshot_shortcuts(self):
+        """Set up screenshot keyboard shortcuts."""
+        # Get shortcuts from settings
+        shortcuts = self.settings.get_setting('shortcuts')
+        
+        # Create screenshot config
+        config = ScreenshotConfig(shortcuts=shortcuts)
+        
+        # Initialize screenshot manager
+        self.screenshot_manager = ScreenshotManager(config)
+        
+        # Set up callback for screenshot actions
+        def screenshot_callback(screenshot_type: ScreenshotType):
+            # Schedule the async handler in the event loop
+            asyncio.run_coroutine_threadsafe(
+                self.handle_screenshot(screenshot_type.name.lower()),
+                self.main_loop
+            )
+        
+        self.screenshot_manager.set_callback(screenshot_callback)
+        
+        # Initialize the manager (now synchronous)
+        if self.screenshot_manager.initialize():
+            self.logger.debug("Screenshot manager initialized with shortcuts")
+        else:
+            self.logger.error("Failed to initialize screenshot manager")
+
+    async def handle_screenshot(self, screenshot_type: str):
+        """Handle screenshot capture request."""
+        try:
+            if not self.clipboard:
+                self.logger.error("Screenshot failed: Clipboard processor not initialized")
+                raise Exception("Clipboard processor not initialized")
+
+            self.logger.info(f"Starting screenshot capture: type={screenshot_type}")
+            self.update_icon(IconState.SCREENSHOT)
+            
+            # Take screenshot using screenshot manager (now synchronous)
+            self.logger.debug("Invoking screenshot manager")
+            screenshot_data = self.screenshot_manager.take_screenshot(
+                getattr(ScreenshotType, screenshot_type.upper())
+            )
+            
+            if screenshot_data:
+                self.logger.info("Screenshot captured successfully")
+                self.logger.debug("Storing screenshot in clipboard processor")
+                # Store screenshot in clipboard processor
+                self.clipboard.set_screenshot(screenshot_data)
+                
+                self.logger.info("Starting screenshot processing")
+                # Process screenshot (this will handle its own state management)
+                await self.clipboard.process_screenshot(self)
+                self.logger.info("Screenshot processing completed")
+            else:
+                self.logger.error("Screenshot capture failed: No data returned")
+                raise Exception("Failed to capture screenshot")
+                
+        except Exception as e:
+            self.logger.error(f"Screenshot error: {e}", exc_info=True)
+            self.update_icon(IconState.ERROR)
+            if self.platform:
+                self.platform.show_notification(
+                    "Screenshot Error",
+                    f"Failed to take screenshot: {str(e)}"
+                )
+            await asyncio.sleep(2)
+            self.update_icon(IconState.IDLE)
+            self.logger.info("Screenshot operation completed with errors")
 
 def main():
     """Main entry point."""
