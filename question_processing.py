@@ -649,24 +649,31 @@ def check_and_modify_mcq_format_flexible(text):
    bool: True if the format is detected, False otherwise.
    str: The modified text if the format is detected and no existing numbering/lettering, otherwise the original text.
    """
-   # Regular expression to detect the MCQ format with or without separation
-   mcq_pattern = r'^(.*?)(\n\s*\n|\n)(.*?)((\n\s*\n|\n).*)*$'
-   # Regular expression to detect existing numbering or lettering 
-   numbering_pattern = r'^(\d+\.|\w\.)\s'
+   # Regular expression to detect the MCQ format with options
+   mcq_pattern = r'^(.+?)(\n\s*\n|\n)(.+?)((\n\s*\n|\n).+)*$'
+   # Regular expression to detect existing numbering or lettering (more comprehensive)
+   numbering_pattern = r'^\s*(?:\d+\.|\w\.|\{\{|\(\w\)|\w\)|\d\))\s'
 
    # Check if the text matches the MCQ format
-   if re.match(mcq_pattern, text, re.DOTALL):
-       # Split text into options
+   match = re.match(mcq_pattern, text, re.DOTALL)
+   if match:
+       # Split text into question and options
        options = re.split(r'\n\s*\n|\n', text)
+       
+       # Validate minimum number of options (at least 2 options after question)
+       if len(options) < 3:  # question + at least 2 options
+           return False, text
 
-       # Check if the first option (after the question) is numbered or lettered
-       if re.match(numbering_pattern, options[1]):
-           # Already numbered/lettered, return original text
+       # Check if ANY of the options have numbering/lettering
+       has_existing_format = any(re.match(numbering_pattern, opt.strip()) for opt in options[1:])
+       
+       if has_existing_format:
+           # If any option has numbering/lettering, return original text
            return True, text
        else:
            # Add numbers before each option except the first one
            modified_text = options[0] + '\n\n' + '\n\n'.join(
-               f"{i}. {opt}" for i, opt in enumerate(options[1:], 1))
+               f"{i}. {opt.strip()}" for i, opt in enumerate(options[1:], 1))
            return True, modified_text
    else:
        return False, text
