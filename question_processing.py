@@ -302,7 +302,7 @@ async def get_related_terms(question, llm_router):
     try:
         logger.info(f"Generating related terms for question: {question[:200]}...")
         related_terms_response = await llm_router.generate(
-            model="gemini-2.0-flash-exp-8b",
+            model="gemini-2.0-flash-lite-preview-02-05-8b",
             max_tokens=30,
             messages=[
                 {
@@ -486,7 +486,7 @@ async def get_answer_with_context(question, llm_router, search, inverted_index, 
         ]
 
         response = await llm_router.generate(
-            model="gemini-2.0-flash-exp",
+            model="gemini-2.0-flash-lite-preview-02-05",
             max_tokens=475,
             messages=messages,
             temperature=0.7,
@@ -530,7 +530,7 @@ async def get_number_with_context(question, llm_router, search, inverted_index, 
             try:
                 response = await asyncio.wait_for(
                     llm_router.generate(
-                        model="gemini-2.0-flash-exp",
+                        model="gemini-2.0-flash-lite-preview-02-05",
                         max_tokens=2,
                         messages=messages,
                         temperature=0.7,
@@ -575,7 +575,7 @@ async def get_answer_with_image(question, llm_router, image_data=None):
    ]
 
    response = await llm_router.generate(
-       model="gemini-2.0-flash-exp",
+       model="gemini-2.0-flash-lite-preview-02-05",
        max_tokens=475,
        messages=messages,
        temperature=0.7,
@@ -598,7 +598,7 @@ async def get_answer_without_context(question, llm_router, image_data=None):
    ]
 
    response = await llm_router.generate(
-       model="gemini-2.0-flash-exp",
+       model="gemini-2.0-flash-lite-preview-02-05",
        max_tokens=650,
        messages=messages,
        temperature=0.7,
@@ -621,7 +621,7 @@ async def get_number_without_context(question, llm_router, image_data=None):
    ]
 
    response = await llm_router.generate(
-       model="gemini-2.0-flash-exp",
+       model="gemini-2.0-flash-lite-preview-02-05",
        max_tokens=2,
        messages=messages,
        temperature=0.7,
