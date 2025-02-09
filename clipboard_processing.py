@@ -186,6 +186,12 @@ class ClipboardProcessor:
                 if not current_clipboard:
                     return
                 
+                # Check if content is just a single word
+                stripped_content = current_clipboard.strip()
+                if len(stripped_content.split()) == 1:
+                    app.update_icon(IconState.IDLE)
+                    return
+                
                 # Check if content is the same as last processed or initial
                 if (current_clipboard == self.last_processed_content or 
                     current_clipboard == self._initial_content):
