@@ -3,8 +3,26 @@
 import os
 import sys
 import argparse
+import subprocess
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+# Ensure cffi and pywin32-ctypes are properly handled
+if sys.platform == 'win32':
+    import cffi
+    import win32ctypes
+    cffi_path = os.path.dirname(cffi.__file__)
+    win32ctypes_path = os.path.dirname(win32ctypes.__file__)
+
+# Pre-cache emojis
+print("Pre-caching common emojis...")
+try:
+    result = subprocess.run([sys.executable, 'build_emoji_cache.py'], check=True)
+    print("Emoji pre-cache completed successfully")
+except subprocess.CalledProcessError as e:
+    print(f"Warning: Emoji pre-cache failed with exit code {e.returncode}")
+except Exception as e:
+    print(f"Warning: Failed to run emoji pre-cache: {e}")
 
 # Parse command line arguments after --
 parser = argparse.ArgumentParser()
@@ -43,9 +61,25 @@ hiddenimports = []
 # Add assets and configuration files
 datas.extend([
     ('assets/icons/*', 'assets/icons'),
+    ('cache/emojis', 'cache/emojis'),  # Add emoji cache directory
 ])
 if is_macos:
     datas.append(('assets/macos/clipbrd.entitlements', 'assets/macos'))
+
+# Add cffi and win32ctypes data files for Windows
+if is_windows:
+    # Add cffi backend
+    cffi_backend = os.path.join(cffi_path, '_cffi_backend.pyd')
+    if os.path.exists(cffi_backend):
+        binaries.append((cffi_backend, '.'))
+    
+    # Add win32ctypes files
+    for root, _, files in os.walk(win32ctypes_path):
+        for file in files:
+            if file.endswith(('.dll', '.pyd')):
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(root, win32ctypes_path)
+                binaries.append((full_path, os.path.join('win32ctypes', rel_path)))
 
 # Core dependencies that need special handling
 core_packages = [
@@ -87,10 +121,28 @@ hiddenimports.extend([
     'keyring.util.platform_',
     'win32ctypes.core',
     'win32ctypes.pywin32',
+    'win32ctypes.core.cffi',
+    'win32ctypes.core.cffi._common',
+    'win32ctypes.core.cffi._util',
+    'win32ctypes.core.cffi._win32cred',
+    'win32ctypes.core.cffi._authentication',
+    'win32ctypes.core.cffi._system_information',
     'emoji.unicode_codes',
     'emoji.core',
     'cffi._cffi_backend',
-    'win32ctypes.core.cffi',
+    'cffi.api',
+    'cffi.backend_ctypes',
+    'cffi.commontypes',
+    'cffi.cparser',
+    'cffi.error',
+    'cffi.ffiplatform',
+    'cffi.lock',
+    'cffi.model',
+    'cffi.recompiler',
+    'cffi.setuptools_ext',
+    'cffi.vengine_cpy',
+    'cffi.vengine_gen',
+    'cffi.verifier',
     '_cffi_backend',
 ])
 
@@ -173,6 +225,10 @@ if os.path.exists(emoji_data):
 else:
     print(f"Warning: emoji.json not found at {emoji_data}")
 
+# Create emoji cache directory if it doesn't exist
+emoji_cache_dir = os.path.join(os.getcwd(), 'cache', 'emojis')
+os.makedirs(emoji_cache_dir, exist_ok=True)
+
 # Create the Analysis object with optimized settings
 a = Analysis(
     ['clipbrd.py'],
@@ -218,7 +274,7 @@ pyz = PYZ(a.pure, a.zipped_data)
 debug_mode = options.debug or options.dev
 console_enabled = debug_mode
 
-# Create the executable with platform-specific settings
+# Create the EXE with optimized settings
 exe = EXE(
     pyz,
     a.scripts,
@@ -229,14 +285,18 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=not debug_mode,
     upx=not debug_mode,
-    console=console_enabled,
+    console=debug_mode,
     disable_windowed_traceback=False,
-    argv_emulation=False if is_windows else True,  # Enable argv emulation on macOS
+    argv_emulation=False,
     target_arch=None,
-    codesign_identity='Developer ID Application' if is_macos else None,
-    entitlements_file=str(entitlements_path) if is_macos else None,
+    codesign_identity=None,
+    entitlements_file=None,
     icon=os.path.join('assets', 'icons', 'clipbrd_windows.ico') if is_windows else None,
     version='file_version_info.txt' if is_windows else None,
+    uac_admin=False,
+    icon_resources=[
+        (1, os.path.join('assets', 'icons', 'clipbrd_windows.ico'))
+    ] if is_windows else [],
 )
 
 # Create the collection with optimized settings

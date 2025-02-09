@@ -25,9 +25,19 @@ class LLMRouter:
             api_key=deepinfra_api_key,
             base_url='https://api.deepinfra.com/v1/openai'
         )
+        
+        # Initialize Gemini model with proper error handling
+        self.gemini_model = None
         if gemini_api_key:
-            genai.configure(api_key=gemini_api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-pro')
+            try:
+                genai.configure(api_key=gemini_api_key)
+                self.gemini_model = genai.GenerativeModel('gemini-pro')
+                logger.info("Successfully initialized Gemini model")
+            except Exception as e:
+                logger.error(f"Failed to initialize Gemini model: {e}")
+                self.gemini_model = None
+        else:
+            logger.warning("No Gemini API key provided, Gemini model will be unavailable")
 
     async def generate(
         self,
@@ -53,6 +63,13 @@ class LLMRouter:
                     top_p, stop_sequences, image_data, system
                 )
             elif model.startswith("gemini"):
+                # Check Gemini model availability
+                if not hasattr(self, 'gemini_model') or self.gemini_model is None:
+                    logger.error("Gemini model not available, falling back to OpenAI")
+                    return await self._generate_openai(
+                        "gpt-3.5-turbo", messages, max_tokens, temperature,
+                        top_p, stop_sequences, image_data, system
+                    )
                 return await self._generate_gemini(
                     model, messages, max_tokens, temperature,
                     top_p, stop_sequences, image_data, system

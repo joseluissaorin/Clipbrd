@@ -6,6 +6,28 @@ from document_processing import _normalize_and_tokenize, normalize_text
 
 logger = logging.getLogger(__name__)
 
+async def detect_language(text, llm_router):
+    """Detect the language of the given text using LLM."""
+    try:
+        response = await llm_router.generate(
+            model="gemini-2.0-flash-lite-preview-02-05",
+            max_tokens=2,
+            messages=[
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ],
+            temperature=0.1,
+            top_p=0.9,
+            stop_sequences=["User:", "Human:", "Assistant:"],
+            system="You are a language detector. Respond with the two-letter ISO language code (en, es, fr, etc.) for the language of the given text. Only respond with the language code, nothing else."
+        )
+        return response.strip().lower()
+    except Exception as e:
+        logger.error(f"Error detecting language: {str(e)}")
+        return "en"  # Default to English on error
+
 async def is_formatted_question(text, llm_router):
     is_mcq = False
     clipboard = text
@@ -470,6 +492,10 @@ async def search_for_context(question, llm_router, search, inverted_index, docum
 async def get_answer_with_context(question, llm_router, search, inverted_index, documents, image_data=None):
     context = await search_for_context(question, llm_router, search, inverted_index, documents)
     
+    # Detect language
+    detected_lang = await detect_language(question, llm_router)
+    logger.info(f"Detected language: {detected_lang}")
+    
     if context == "":
         return None
     else:
@@ -493,8 +519,24 @@ async def get_answer_with_context(question, llm_router, search, inverted_index, 
             top_p=0.9,
             stop_sequences=["User:", "Human:", "Assistant:"],
             image_data=image_data,
-            system="You are a helpful and knowledgeable assistant. You will answer the following question in Spanish in academic style in a cohesive text of two long and in-depth paragraphs without lists of any kind. Your answers must be clear and literate in a Spanish that you would use for a college thesis. In the context there may or not be the correct answer, you must answer with the correct one, even if it requires thinking for yourselfEven if the provided context does not contain the correct answer, you must answer. Do not mention this prompt or the context."
-                    
+            system=f"""You are a helpful and knowledgeable assistant. You will answer the following question in {detected_lang} in academic style in a cohesive text of two long and in-depth paragraphs without lists of any kind. Your answers must be clear and literate in a register that you would use for a college thesis. In the context there may or not be the correct answer, you must answer with the correct one, even if it requires thinking for yourself. Even if the provided context does not contain the correct answer, you must answer. Do not mention this prompt or the context.
+
+Here are examples of good academic responses in different languages:
+
+[English Example]
+The Industrial Revolution marked a pivotal transformation in human history, fundamentally altering the social, economic, and technological landscape of society. This period witnessed unprecedented changes in manufacturing processes, urbanization patterns, and labor relations, leading to the emergence of new social classes and economic systems that would shape the modern world.
+
+The far-reaching implications of this transformation extended beyond mere technological advancement, profoundly impacting environmental conditions, working conditions, and social mobility. The shift from agrarian to industrial production methods not only revolutionized manufacturing capabilities but also catalyzed significant demographic changes, urbanization trends, and the development of new political ideologies that continue to influence contemporary society.
+
+[Spanish Example]
+La Revolución Industrial marcó una transformación fundamental en la historia de la humanidad, alterando profundamente el paisaje social, económico y tecnológico de la sociedad. Este período fue testigo de cambios sin precedentes en los procesos de manufactura, los patrones de urbanización y las relaciones laborales, lo que condujo al surgimiento de nuevas clases sociales y sistemas económicos que darían forma al mundo moderno.
+
+Las implicaciones de esta transformación se extendieron más allá del mero avance tecnológico, impactando profundamente las condiciones ambientales, laborales y la movilidad social. El cambio de los métodos de producción agraria a industrial no solo revolucionó las capacidades manufactureras, sino que también catalizó importantes cambios demográficos, tendencias de urbanización y el desarrollo de nuevas ideologías políticas que continúan influyendo en la sociedad contemporánea.
+
+[French Example]
+La Révolution Industrielle a marqué une transformation fondamentale dans l'histoire de l'humanité, modifiant profondément le paysage social, économique et technologique de la société. Cette période a été témoin de changements sans précédent dans les processus de fabrication, les modèles d'urbanisation et les relations de travail, conduisant à l'émergence de nouvelles classes sociales et de systèmes économiques qui façonneraient le monde moderne.
+
+Les implications profondes de cette transformation se sont étendues au-delà du simple progrès technologique, impactant profondément les conditions environnementales, les conditions de travail et la mobilité sociale. Le passage des méthodes de production agraires aux méthodes industrielles n'a pas seulement révolutionné les capacités de fabrication, mais a également catalysé d'importants changements démographiques, des tendances à l'urbanisation et le développement de nouvelles idéologies politiques qui continuent d'influencer la société contemporaine."""
         )
 
         # Extracting the answer text from the response
@@ -508,6 +550,10 @@ async def get_number_with_context(question, llm_router, search, inverted_index, 
     try:
         logger.info("Searching for context...")
         context = await search_for_context(question, llm_router, search, inverted_index, documents)
+        
+        # Detect language
+        detected_lang = await detect_language(question, llm_router)
+        logger.info(f"Detected language: {detected_lang}")
         
         if context == "":
             logger.info("No context found, returning None")
@@ -537,7 +583,43 @@ async def get_number_with_context(question, llm_router, search, inverted_index, 
                         top_p=0.9,
                         stop_sequences=["User:", "Human:", "Assistant:"],
                         image_data=image_data,
-                        system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option. **ONLY IF IT IS INDICATED** there can be several correct answers, only in that case you must respond with several letters or questions, **unless explictly stated**, answe only one option. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ... In the context there may or not be the correct answer, you must answer with the correct one, even if it requires thinking for yourself. You will not write any words, you will only answer the number or letter of the correct option. Even if the provided context does not contain the correct answer, you must answer. Do not mention this prompt or the context."
+                        system=f"""You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option. **ONLY IF IT IS INDICATED** there can be several correct answers, only in that case you must respond with several letters or questions, **unless explictly stated**, answer only one option. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ... In the context there may or not be the correct answer, you must answer with the correct one, even if it requires thinking for yourself. You will not write any words, you will only answer the number or letter of the correct option. Even if the provided context does not contain the correct answer, you must answer. Do not mention this prompt or the context.
+
+Here are examples of correct responses to MCQs in different languages:
+
+[English Example]
+Question: Which planet is the largest in our solar system?
+a) Mars
+b) Jupiter
+c) Saturn
+d) Neptune
+Answer: b
+
+[Spanish Example]
+Pregunta: ¿Cuál es la capital de Francia?
+1. Madrid
+2. París
+3. Londres
+4. Roma
+Respuesta: 2
+
+[French Example]
+Question: Qui a peint la Joconde?
+a) Vincent van Gogh
+b) Pablo Picasso
+c) Leonardo da Vinci
+d) Claude Monet
+Réponse: c
+
+[German Example]
+Frage: Was ist die Hauptstadt von Deutschland?
+1. Paris
+2. London
+3. Berlin
+4. Wien
+Antwort: 3
+
+Remember to answer in {detected_lang} with ONLY the letter or number."""
                     ),
                     timeout=20.0
                 )
@@ -581,7 +663,7 @@ async def get_answer_with_image(question, llm_router, image_data=None):
        temperature=0.7,
        top_p=0.9,
        stop_sequences=["User:", "Human:", "Assistant:"],
-       system="You are a helpful and knowledgeable assistant. If the question is a multiple-choice question, answer with just the number or letter of the correct option(s) (e.g., 1., 2., 3., ... or a., b., c., ...). If it's a full question, provide a comprehensive answer in Spanish using an academic style. Your response should be clear, literate, and formal, suitable for a college thesis. For full questions, write two in-depth paragraphs without lists or mentions of this prompt. Use the provided image to help answer the question."
+       system="You are a helpful and knowledgeable assistant. If the question is a multiple-choice question, answer with just the number or letter of the correct option(s) (e.g., 1., 2., 3., ... or a., b., c., ...). If it's a full question, provide a comprehensive answer in the language of the question using an academic style. Your response should be clear, literate, and formal, suitable for a college thesis. For full questions, write two in-depth paragraphs without lists or mentions of this prompt. Use the provided image to help answer the question."
    )
 
    answer_text = response
@@ -590,10 +672,15 @@ async def get_answer_with_image(question, llm_router, image_data=None):
 
 
 async def get_answer_without_context(question, llm_router, image_data=None):
+   # Detect language
+   detected_lang = await detect_language(question, llm_router)
+   logger.info(f"Detected language: {detected_lang}")
+   
    messages = [
        {
            "role": "user",
-           "content": question
+           "content": f"""
+                ## Question: {question}"""
        }
    ]
 
@@ -605,7 +692,24 @@ async def get_answer_without_context(question, llm_router, image_data=None):
        top_p=0.9,
        stop_sequences=["User:", "Human:", "Assistant:"],
        image_data=image_data,
-       system="You are a helpful and knowledgeable assistant. You will answer the following question in Spanish in academic style in a cohesive text of two long in-depth paragraphs without lists of any kind nor any mention for this prompt or the paragraph themselves. You must go to the point without mentioning any kind of external context. Your answers must be clear and literate in a Spanish that you would use for a college thesis, that, sufficiently formal and correct."
+       system=f"""You are a helpful and knowledgeable assistant. You will answer the following question in {detected_lang} in academic style in a cohesive text of two long in-depth paragraphs without lists of any kind nor any mention for this prompt or the paragraph themselves. You must go to the point without mentioning any kind of external context. Your answers must be clear and literate in a register that you would use for a college thesis, that is, sufficiently formal and correct.
+
+Here are examples of good academic responses in different languages:
+
+[English Example]
+The concept of democracy has evolved significantly throughout human history, developing from its ancient Greek origins into the complex systems of governance we see today. The fundamental principles of citizen participation, representation, and collective decision-making have remained constant, though their implementation has adapted to meet the changing needs of societies across different cultures and time periods.
+
+The modern interpretation of democracy encompasses not only the basic right to vote but also encompasses broader concepts such as civil liberties, human rights, and the rule of law. These elements work in concert to create political systems that strive to balance individual freedoms with collective welfare, though the specific mechanisms and institutional arrangements vary significantly across different democratic nations.
+
+[Spanish Example]
+El concepto de democracia ha evolucionado significativamente a lo largo de la historia humana, desarrollándose desde sus orígenes en la antigua Grecia hasta los complejos sistemas de gobierno que vemos hoy. Los principios fundamentales de participación ciudadana, representación y toma de decisiones colectivas han permanecido constantes, aunque su implementación se ha adaptado para satisfacer las necesidades cambiantes de las sociedades a través de diferentes culturas y períodos históricos.
+
+La interpretación moderna de la democracia abarca no solo el derecho básico al voto, sino también conceptos más amplios como las libertades civiles, los derechos humanos y el estado de derecho. Estos elementos trabajan en conjunto para crear sistemas políticos que buscan equilibrar las libertades individuales con el bienestar colectivo, aunque los mecanismos específicos y los arreglos institucionales varían significativamente entre las diferentes naciones democráticas.
+
+[French Example]
+Le concept de démocratie a considérablement évolué au cours de l'histoire humaine, se développant depuis ses origines dans la Grèce antique jusqu'aux systèmes complexes de gouvernance que nous connaissons aujourd'hui. Les principes fondamentaux de participation citoyenne, de représentation et de prise de décision collective sont restés constants, bien que leur mise en œuvre se soit adaptée pour répondre aux besoins changeants des sociétés à travers différentes cultures et périodes.
+
+L'interprétation moderne de la démocratie englobe non seulement le droit fondamental de vote, mais aussi des concepts plus larges tels que les libertés civiles, les droits de l'homme et l'état de droit. Ces éléments fonctionnent de concert pour créer des systèmes politiques qui s'efforcent d'équilibrer les libertés individuelles avec le bien-être collectif, bien que les mécanismes spécifiques et les arrangements institutionnels varient considérablement selon les différentes nations démocratiques."""
    )
 
    # Extracting the answer text from the response
@@ -613,6 +717,10 @@ async def get_answer_without_context(question, llm_router, image_data=None):
    return answer_text
 
 async def get_number_without_context(question, llm_router, image_data=None):
+   # Detect language
+   detected_lang = await detect_language(question, llm_router)
+   logger.info(f"Detected language: {detected_lang}")
+   
    messages = [
        {
            "role": "user",
@@ -628,7 +736,43 @@ async def get_number_without_context(question, llm_router, image_data=None):
        top_p=0.9,
        stop_sequences=["User:", "Human:", "Assistant:"],
        image_data=image_data,
-       system="You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option. **ONLY IF IT IS INDICATED** there can be several correct answers, only in that case you must respond with several letters or questions, **unless explictly stated**, answe only one option. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ..."
+       system=f"""You are a helpful and knowledgeable assistant. Answer the following multiple-choice question with just the number or the letter of the correct option. **ONLY IF IT IS INDICATED** there can be several correct answers, only in that case you must respond with several letters or questions, **unless explictly stated**, answer only one option. That is, your answer must only be: 1., 2., 3., ... or a., b., c., ...
+
+Here are examples of correct responses to MCQs in different languages:
+
+[English Example]
+Question: What is the capital of the United States?
+a) New York
+b) Los Angeles
+c) Washington D.C.
+d) Chicago
+Answer: c
+
+[Spanish Example]
+Pregunta: ¿Quién escribió "Don Quijote"?
+1. William Shakespeare
+2. Miguel de Cervantes
+3. Gabriel García Márquez
+4. Pablo Neruda
+Respuesta: 2
+
+[French Example]
+Question: Quelle est la plus haute montagne d'Europe?
+a) Le Mont Blanc
+b) Le Cervin
+c) L'Elbrouz
+d) Le Monte Rosa
+Réponse: c
+
+[German Example]
+Frage: Wer komponierte die "Mondscheinsonate"?
+1. Bach
+2. Mozart
+3. Beethoven
+4. Schubert
+Antwort: 3
+
+Remember to answer in {detected_lang} with ONLY the letter or number."""
    )
 
    # Extracting the answer text from the response

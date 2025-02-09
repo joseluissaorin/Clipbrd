@@ -40,3 +40,15 @@ modified_license_manager.log
 modified_clipbrd.log
 
 test_question_processing.py
+
+alternative_cdn_test.log
+emoji_source_test.log
+
+test_alternative_cdn.py
+test_emoji_sources.py
+
+build_emoji_cache.log
+
+cache/** 
+cache
+
