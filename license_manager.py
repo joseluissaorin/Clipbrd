@@ -9,6 +9,8 @@ from cryptography.fernet import Fernet
 import json
 import sys
 
+
+
 # Initialize Windows keyring backend if on Windows
 if sys.platform == 'win32':
     try:

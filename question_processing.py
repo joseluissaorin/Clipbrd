@@ -10,7 +10,7 @@ async def detect_language(text, llm_router):
     """Detect the language of the given text using LLM."""
     try:
         response = await llm_router.generate(
-            model="gemini-2.0-flash-lite-preview-02-05",
+            model="gemini-2.0-flash",
             max_tokens=2,
             messages=[
                 {
@@ -39,7 +39,7 @@ async def is_formatted_question(text, llm_router):
         return True, clipboard
     else:
         response = await llm_router.generate(
-            model="gemini-2.0-flash-lite-preview-02-05",
+            model="gemini-2.0-flash",
             max_tokens=1,
             messages=[
                 {
@@ -297,7 +297,7 @@ async def is_formatted_question(text, llm_router):
 
 async def is_question(text, llm_router):
     response = await llm_router.generate(
-        model="gemini-2.0-flash-lite-preview-02-05",
+        model="gemini-2.0-flash",
         max_tokens=3,
         messages=[
             {
@@ -324,7 +324,7 @@ async def get_related_terms(question, llm_router):
     try:
         logger.info(f"Generating related terms for question: {question[:200]}...")
         related_terms_response = await llm_router.generate(
-            model="gemini-2.0-flash-lite-preview-02-05",
+            model="gemini-2.0-flash",
             max_tokens=30,
             messages=[
                 {
@@ -512,7 +512,7 @@ async def get_answer_with_context(question, llm_router, search, inverted_index, 
         ]
 
         response = await llm_router.generate(
-            model="gemini-2.0-flash-lite-preview-02-05",
+            model="gemini-2.0-flash",
             max_tokens=475,
             messages=messages,
             temperature=0.7,
@@ -685,7 +685,7 @@ async def get_answer_without_context(question, llm_router, image_data=None):
    ]
 
    response = await llm_router.generate(
-       model="gemini-2.0-flash-lite-preview-02-05",
+       model="gemini-2.0-flash",
        max_tokens=650,
        messages=messages,
        temperature=0.7,
@@ -729,7 +729,7 @@ async def get_number_without_context(question, llm_router, image_data=None):
    ]
 
    response = await llm_router.generate(
-       model="gemini-2.0-flash-lite-preview-02-05",
+       model="gemini-2.0-flash",
        max_tokens=2,
        messages=messages,
        temperature=0.7,

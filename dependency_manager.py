@@ -147,28 +147,28 @@ class DependencyManager:
                 # Skip Python package installation if running as compiled binary
                 return True
 
-            required = self._get_required_dependencies()
-            pip_cmd = [sys.executable, "-m", "pip", "install"]
+            # required = self._get_required_dependencies()
+            # pip_cmd = [sys.executable, "-m", "pip", "install"]
             
-            # Install fairy-doc from GitHub
-            try:
-                subprocess.run([*pip_cmd, "git+https://github.com/opendatalab/magic-doc.git"], 
-                             check=True, 
-                             capture_output=True)
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"Failed to install fairy-doc from GitHub: {e}")
-                return False
+            # # Install fairy-doc from GitHub
+            # try:
+            #     subprocess.run([*pip_cmd, "git+https://github.com/opendatalab/magic-doc.git"], 
+            #                  check=True, 
+            #                  capture_output=True)
+            # except subprocess.CalledProcessError as e:
+            #     self.logger.error(f"Failed to install fairy-doc from GitHub: {e}")
+            #     return False
 
-            # Install other dependencies
-            for package, version in required.items():
-                if package != "fairy-doc":  # Skip fairy-doc as it's already installed
-                    try:
-                        subprocess.run([*pip_cmd, f"{package}>={version}"], 
-                                     check=True, 
-                                     capture_output=True)
-                    except subprocess.CalledProcessError as e:
-                        self.logger.error(f"Failed to install {package}: {e}")
-                        return False
+            # # Install other dependencies
+            # for package, version in required.items():
+            #     if package != "fairy-doc":  # Skip fairy-doc as it's already installed
+            #         try:
+            #             subprocess.run([*pip_cmd, f"{package}>={version}"], 
+            #                          check=True, 
+            #                          capture_output=True)
+            #         except subprocess.CalledProcessError as e:
+            #             self.logger.error(f"Failed to install {package}: {e}")
+            #             return False
             
             return True
         except Exception as e:

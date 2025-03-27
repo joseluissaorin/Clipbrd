@@ -169,7 +169,7 @@ class BuildSystem:
             if re.search(load_env_pattern, content):
                 modified_content = re.sub(
                     load_env_pattern + r"[^\n]+(\n\s+[^\n]+)*",
-                    lambda m: m.group(0) + env_init_code + "\n    logging.info('Using hardcoded environment variables')",
+                    lambda m: m.group(0) + env_init_code + "\n    logging.info('Using hardcoded environment variables') \n",
                     content
                 )
             else:
