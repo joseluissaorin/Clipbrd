@@ -437,9 +437,9 @@ class SettingsManager:
         minimize_var = tk.BooleanVar(value=self.settings.minimize_to_tray)
         ttk.Checkbutton(settings_frame, text="Minimize to Tray", variable=minimize_var).grid(row=3, column=0, sticky=tk.W, pady=5)
 
-        # # Language
+        # Language (commented out but need to define the variable for save_settings)
         # ttk.Label(settings_frame, text="Language:").grid(row=4, column=0, sticky=tk.W, pady=5)
-        # lang_var = tk.StringVar(value=self.settings.language)
+        lang_var = tk.StringVar(value=self.settings.language)
         # lang_combo = ttk.Combobox(settings_frame, textvariable=lang_var, values=["en", "es", "fr", "de"], state="readonly")
         # lang_combo.grid(row=4, column=1, sticky=tk.W, pady=5)
 

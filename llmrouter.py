@@ -31,7 +31,7 @@ class LLMRouter:
         if gemini_api_key:
             try:
                 genai.configure(api_key=gemini_api_key)
-                self.gemini_model = genai.GenerativeModel('gemini-pro')
+                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
                 logger.info("Successfully initialized Gemini model")
             except Exception as e:
                 logger.error(f"Failed to initialize Gemini model: {e}")
