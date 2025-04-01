@@ -209,6 +209,11 @@ class SettingsManager:
         if self.settings_window is not None:
             try:
                 self.settings_window.focus_force()
+                self.settings_window.lift()  # Raise window to top
+                # On Windows, this helps with focus issues
+                if os.name == 'nt':
+                    self.settings_window.attributes('-topmost', 1)
+                    self.settings_window.after(100, lambda: self.settings_window.attributes('-topmost', 0))
                 return
             except tk.TclError:
                 # Window was destroyed but reference remains
@@ -218,6 +223,19 @@ class SettingsManager:
         self.settings_window = tk.Tk()
         root = self.settings_window
         root.title("Clipbrd Settings")
+        
+        # Ensure window appears in the foreground
+        root.lift()
+        root.focus_force()
+        
+        # On Windows, this helps with focus issues
+        if os.name == 'nt':
+            try:
+                root.attributes('-topmost', 1)
+                # Remove the topmost attribute after a short delay
+                root.after(100, lambda: root.attributes('-topmost', 0))
+            except Exception as e:
+                self.logger.error(f"Error setting topmost attribute: {e}")
         
         # Define on_closing function at the start
         def on_closing():
