@@ -66,21 +66,6 @@ datas.extend([
 if is_macos:
     datas.append(('assets/macos/clipbrd.entitlements', 'assets/macos'))
 
-# Add cffi and win32ctypes data files for Windows
-if is_windows:
-    # Add cffi backend
-    cffi_backend = os.path.join(cffi_path, '_cffi_backend.pyd')
-    if os.path.exists(cffi_backend):
-        binaries.append((cffi_backend, '.'))
-    
-    # Add win32ctypes files
-    for root, _, files in os.walk(win32ctypes_path):
-        for file in files:
-            if file.endswith(('.dll', '.pyd')):
-                full_path = os.path.join(root, file)
-                rel_path = os.path.relpath(root, win32ctypes_path)
-                binaries.append((full_path, os.path.join('win32ctypes', rel_path)))
-
 # Core dependencies that need special handling
 core_packages = [
     'PIL',
@@ -346,24 +331,4 @@ if is_macos:
         # Code signing settings
         codesign_identity='Developer ID Application',
         entitlements_file=str(entitlements_path),
-    )
-
-# Add cffi and win32ctypes data files explicitly
-if is_windows:
-    import cffi
-    cffi_path = os.path.dirname(cffi.__file__)
-    cffi_backend = os.path.join(cffi_path, '_cffi_backend.pyd')
-    if os.path.exists(cffi_backend):
-        binaries.append((cffi_backend, '.'))
-        print(f"Found cffi backend: {cffi_backend}")
-    
-    # Add win32ctypes core DLLs
-    win32ctypes_path = os.path.join(site_packages, 'win32ctypes')
-    if os.path.exists(win32ctypes_path):
-        for root, _, files in os.walk(win32ctypes_path):
-            for file in files:
-                if file.endswith('.dll') or file.endswith('.pyd'):
-                    full_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(root, win32ctypes_path)
-                    binaries.append((full_path, os.path.join('win32ctypes', rel_path)))
-                    print(f"Found win32ctypes binary: {full_path}") 
+    ) 
