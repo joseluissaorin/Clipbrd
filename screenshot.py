@@ -215,31 +215,36 @@ class ScreenshotManager:
     
 
 def load_shortcuts() -> Dict[str, str]:
-    """Load shortcuts from config file."""
+    """Load shortcuts from config file, ensuring defaults exist."""
     config_dir = Path.home() / ".clipbrd"
     config_file = config_dir / "screenshot_config.json"
-    
+
     default_shortcuts = {
         "full_screenshot": "<ctrl>+<shift>+f",
-        "region_screenshot": "<ctrl>+<shift>+r",
-        "predefined_screenshot": "<ctrl>+<shift>+p",
-        "custom_screenshot": "<ctrl>+<shift>+l"
+        "region_screenshot": "<ctrl>+<shift>+r", # Assuming this might exist
+        "predefined_screenshot": "<ctrl>+<shift>p", # Assuming this might exist
+        "custom_screenshot": "<ctrl>+<shift>+l", # Assuming this might exist
+        "reset_icon_shortcut": "<ctrl>+<shift>+i" # Added default reset shortcut
     }
-    
+
+    loaded_shortcuts = {}
     try:
         if config_file.exists():
             with open(config_file, 'r') as f:
-                data = json.loads(f.read())
-                shortcuts = data.get("shortcuts", {})
-                # Ensure all default shortcuts exist
-                for key, value in default_shortcuts.items():
-                    if key not in shortcuts:
-                        shortcuts[key] = value
-                return shortcuts
+                data = json.load(f) # Changed from json.loads(f.read())
+                loaded_shortcuts = data.get("shortcuts", {})
+        else:
+            logger.info("screenshot_config.json not found, using default shortcuts.")
     except Exception as e:
-        logger.error(f"Error loading shortcuts: {e}")
-    
-    return default_shortcuts
+        logger.error(f"Error loading shortcuts from {config_file}: {e}, using defaults.")
+        loaded_shortcuts = {} # Reset to empty on error
+
+    # Merge defaults with loaded, prioritizing loaded values
+    final_shortcuts = default_shortcuts.copy()
+    final_shortcuts.update(loaded_shortcuts)
+
+    logger.debug(f"Final shortcuts loaded: {final_shortcuts}")
+    return final_shortcuts
 
 def save_shortcuts(shortcuts: Dict[str, str]) -> None:
     """Save shortcuts to config file."""

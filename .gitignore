@@ -52,3 +52,5 @@ build_emoji_cache.log
 cache/** 
 cache
 
+test_gemini_image.py
+

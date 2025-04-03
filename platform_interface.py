@@ -12,6 +12,7 @@ import threading
 import winsound
 from pynput import keyboard
 from screenshot import ScreenshotType
+from settings_manager import SettingsManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,9 @@ class PlatformConfig:
 class PlatformInterface(abc.ABC):
     """Abstract base class for platform-specific implementations."""
     
-    def __init__(self, config: PlatformConfig):
+    def __init__(self, config: PlatformConfig, settings_manager: SettingsManager):
         self.config = config
+        self.settings_manager = settings_manager
         self.setup_logging()
         self._frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self._frame_idx = 0
@@ -101,8 +103,8 @@ class PlatformInterface(abc.ABC):
 class WindowsPlatform(PlatformInterface):
     """Windows-specific implementation using pystray."""
     
-    def __init__(self, config: PlatformConfig):
-        super().__init__(config)
+    def __init__(self, config: PlatformConfig, settings_manager: SettingsManager):
+        super().__init__(config, settings_manager)
         import pystray
         from PIL import Image
         import queue
@@ -123,6 +125,7 @@ class WindowsPlatform(PlatformInterface):
             IconState.MCQ_ANSWER: None  # Will be handled specially with text
         }
         self.screenshot_callback = None
+        self.config.notification_sound = self.settings_manager.get_setting('notification_sound')
         self.notification_sounds = {
             "screenshot": (800, 200),  # Frequency, Duration
             "success": (1000, 200),
@@ -210,49 +213,57 @@ class WindowsPlatform(PlatformInterface):
             self.logger.debug(f"Queueing icon update: state={state}, text={text}")
             self.icon_update_queue.put((state, text))
             
-            # Play appropriate sound based on state
-            if state == IconState.SCREENSHOT:
-                self.play_sound("screenshot")
-            elif state == IconState.SUCCESS:
-                self.play_sound("success")
-            elif state == IconState.ERROR:
-                self.play_sound("error")
+            # Play sound based on state and *current* setting value
+            if self.settings_manager.get_setting('notification_sound'):
+                if state == IconState.SCREENSHOT: self.play_sound("screenshot")
+                elif state == IconState.SUCCESS: self.play_sound("success")
+                elif state == IconState.ERROR: self.play_sound("error")
                 
         except Exception as e:
             self.logger.error(f"Failed to queue icon update: {e}", exc_info=True)
     
     def _update_icon_image(self, state: IconState, text: Optional[str] = None) -> None:
-        """Update the icon image in the main thread."""
+        """Update the icon image in the main thread, applying theme."""
         try:
             self.logger.debug(f"Updating icon image: state={state}, text={text}")
             from utils import create_text_image
             
+            # Get current theme setting
+            theme = self.settings_manager.get_setting('theme')
+            bg_color = 'black' if theme == 'dark' else 'white'
+            text_color = 'white' if theme == 'dark' else 'black'
+            self.logger.debug(f"Applying theme: {theme} (bg: {bg_color}, text: {text_color})")
+
+            icon_image = None # Initialize
             if state == IconState.IDLE:
-                # For IDLE state, always use the original icon file
                 self.logger.debug("Loading IDLE state icon")
-                icon_image = self.Image.open(self._icon_states[state])
+                # For IDLE, load the base icon file. Theme doesn't apply here.
+                try:
+                    icon_image = self.Image.open(self._icon_states[state])
+                except Exception as file_e:
+                    logger.error(f"Failed to load IDLE icon file {self._icon_states[state]}: {file_e}")
+                    # Fallback to creating a default text image if file load fails
+                    icon_image = create_text_image("C", background_color=bg_color, text_color=text_color)
+
             elif state == IconState.MCQ_ANSWER and text:
-                # For MCQ answers, create image directly from the answer text
                 self.logger.debug(f"Creating MCQ answer image with text: {text}")
-                icon_image = create_text_image(text)
+                icon_image = create_text_image(text, background_color=bg_color, text_color=text_color)
             else:
-                # Handle other states
-                if text:
-                    # Custom text for any other state
-                    self.logger.debug(f"Creating custom text image: {text}")
-                    icon_image = create_text_image(text)
-                else:
-                    # Use the emoji for the state
-                    icon_content = self._icon_states[state]
-                    self.logger.debug(f"Creating emoji image for state: {icon_content}")
-                    icon_image = create_text_image(icon_content)
-            
-            if self.icon:
+                # Handle other states (WORKING, SUCCESS, ERROR, etc.)
+                icon_content = text if text else self._icon_states.get(state, "?") # Use text if provided, else emoji/fallback
+                self.logger.debug(f"Creating text/emoji image for state: {icon_content}")
+                icon_image = create_text_image(icon_content, background_color=bg_color, text_color=text_color)
+
+            if self.icon and icon_image:
                 self.logger.debug("Updating icon with new image")
                 self.icon.icon = icon_image
+                # self.icon.update_menu() # Might be needed if menu changes dynamically
                 self.logger.debug("Icon update complete")
-            else:
+            elif not self.icon:
                 self.logger.error("Icon not initialized for update")
+            elif not icon_image:
+                self.logger.error(f"Failed to generate icon image for state {state}")
+
         except Exception as e:
             self.logger.error(f"Failed to update Windows icon: {e}", exc_info=True)
     
@@ -442,8 +453,8 @@ class WindowsPlatform(PlatformInterface):
 class MacOSPlatform(PlatformInterface):
     """macOS-specific implementation using rumps."""
     
-    def __init__(self, config: PlatformConfig):
-        super().__init__(config)
+    def __init__(self, config: PlatformConfig, settings_manager: SettingsManager):
+        super().__init__(config, settings_manager)
         import rumps
         self.rumps = rumps
         self.app = None
@@ -520,11 +531,11 @@ class MacOSPlatform(PlatformInterface):
         except Exception as e:
             self.logger.error(f"Failed to cleanup macOS app: {e}")
 
-def create_platform_interface(config: PlatformConfig) -> PlatformInterface:
+def create_platform_interface(config: PlatformConfig, settings_manager: SettingsManager) -> PlatformInterface:
     """Factory function to create platform-specific interface."""
     if sys.platform == 'darwin':
-        return MacOSPlatform(config)
+        return MacOSPlatform(config, settings_manager)
     elif sys.platform == 'win32':
-        return WindowsPlatform(config)
+        return WindowsPlatform(config, settings_manager)
     else:
         raise NotImplementedError(f"Platform {sys.platform} is not supported") 

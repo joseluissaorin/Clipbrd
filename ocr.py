@@ -5,6 +5,7 @@ import uuid
 import os
 import logging
 from PIL import Image
+from typing import Optional
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -137,46 +138,53 @@ def ocr_image(base64_image, lang='spa+eng', mime_type='image/png'):
         logger.error(f"OCR processing failed: {str(e)}", exc_info=True)
         raise
 
-async def is_question_with_image(image_url, llm_router):
+async def is_question_with_image(image_url_or_base64, llm_router):
     """Determine if an image contains a question with an image."""
+    logger.debug("Checking if content contains a question with an image using Gemini.")
     try:
+        # Extract base64 data and mime type from input
+        if image_url_or_base64.startswith('data:image/'):
+            header, base64_data = image_url_or_base64.split(',', 1)
+            mime_type = header.split(';')[0].split(':')[1] # e.g., image/png
+            logger.debug(f"Extracted mime_type: {mime_type} from data URL.")
+        else:
+            # Assume raw base64, default to png? Or raise error?
+            # Let's assume PNG for now if no header, but log a warning.
+            base64_data = image_url_or_base64
+            mime_type = "image/png"
+            logger.warning("Input for is_question_with_image lacked data URL header, assuming image/png.")
+
+        image_input_data = {
+            "base64": base64_data,
+            "mime_type": mime_type
+        }
+
         messages = [
             {
-                "role": "system",
-                "content": "You are a helpful assistant that determines if an image contains a question with an image or just text. If it is only text answer 'no', if it has both text and an image answer 'yes'. Answer only 'yes' or 'no'."
-            },
-            {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Does the following image contain a question with an image?"
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": image_url,
-                            "detail": "low"
-                        }
-                    }
-                ]
+                "content": "Does the following image contain both a question (text) AND a distinct graphical image/diagram relevant to the question? Answer only 'yes' or 'no'."
+                 # Content doesn't need image here, it's passed via image_data
             }
         ]
 
         response = await llm_router.generate(
-            model="gemini-2.0-flash-exp",
+            model="gemini-1.5-flash", # Ensure this model supports vision
             max_tokens=3,
             messages=messages,
-            temperature=0.7,
+            temperature=0.1, # Low temp for classification
             top_p=0.9,
-            stop_sequences=["User:", "Human:", "Assistant:"],
+            # stop_sequences=["User:", "Human:", "Assistant:"], # Optional for Gemini
+            image_data=image_input_data, # Pass the structured image data
+            system="You are an assistant that determines if an image contains both significant text (like a question) AND a relevant graphical image/diagram. Ignore logos or simple formatting. Answer only 'yes' or 'no'."
         )
 
-        logger.info(f"Question with image detection response: {response}")
-        return response.strip().lower() == "yes"
+        result = response.strip().lower()
+        logger.info(f"Question with image detection response: {result}")
+        return result == "yes"
+
     except Exception as e:
         logger.error(f"Error in is_question_with_image: {e}", exc_info=True)
-        return False
+        return False # Default to False on error
 
 def extract_text_from_image(image_url, llm_router):
     messages = [
@@ -214,15 +222,100 @@ def extract_text_from_image(image_url, llm_router):
     generated_text = response
     return generated_text
 
-async def extract_question_from_ocr(image_url, llm_router):
-    # First, perform OCR on the image
-    ocr_text = ocr_image(base64_image=image_url)
+async def extract_question_from_image_gemini(image_url_or_base64: str, llm_router) -> Optional[str]:
+    """Extract question from an image using Gemini vision, preserving formulas/layout."""
+    logger.info("Attempting to extract question from image using Gemini Vision")
 
-    # Now, use LLM to extract and format the question from the OCR text
-    messages = [
-        {
-            "role": "system",
-            "content": """You are a helpful assistant that extracts questions from OCR text. The text is from a screenshot of a test or exam. A question will be EITHER an MCQ OR a long-answer question, never both.
+    try:
+        # Extract base64 data and mime type from input
+        if image_url_or_base64.startswith('data:image/'):
+            header, base64_data = image_url_or_base64.split(',', 1)
+            mime_type = header.split(';')[0].split(':')[1]
+            logger.debug(f"Extracted mime_type: {mime_type} from data URL.")
+        else:
+            base64_data = image_url_or_base64
+            mime_type = "image/png"
+            logger.warning("Input for extract_question_from_image_gemini lacked data URL header, assuming image/png.")
+
+        # Prepare image data in the format expected by the updated llmrouter.py
+        image_input_data = {
+            "base64": base64_data,
+            "mime_type": mime_type
+        }
+
+        # System prompt can be passed separately now
+        system_prompt = """You are an expert OCR and question extraction assistant. Extract all text content from the image accurately, paying close attention to preserving mathematical formulas, code snippets, and the layout/numbering of multiple-choice options. After extracting the full text, identify the primary question within the extracted text and return *only* the formatted question (including all its options if it's a multiple-choice question). Preserve markdown formatting. Do not add any introductory text, explanation, or commentary. If it is an MCQ, include all options verbatim.
+
+Example MCQ Output:
+What is the derivative of x^2?
+
+a) 2x
+b) x
+c) x^3 / 3
+d) 1
+
+Example Long-Answer Output:
+Explain the process of photosynthesis, including the chemical equation.
+"""
+
+        messages = [
+            {
+                "role": "user",
+                "content": "Extract the primary question from the provided image based on the instructions."
+                # Content doesn't include the image here
+            }
+        ]
+
+        model_to_use = "gemini-1.5-flash" # Ensure vision support
+        
+        logger.debug(f"Sending request to Gemini with image data of size {len(base64_data)}, mime_type: {mime_type}")
+        
+        try:
+            response = await llm_router.generate(
+                model=model_to_use,
+                max_tokens=1024,
+                messages=messages,
+                temperature=0.1,
+                top_p=0.9,
+                image_data=image_input_data, # Pass structured image data
+                system=system_prompt
+            )
+            logger.debug("Successfully received response from Gemini.")
+        except Exception as api_e:
+            logger.error(f"API error during Gemini Vision call: {api_e}", exc_info=True)
+            raise ValueError(f"Gemini Vision API error: {api_e}") from api_e
+
+        extracted_question = response.strip()
+        if extracted_question:
+            logger.info(f"Successfully extracted question using Gemini Vision: {extracted_question[:200]}...")
+            # Log full only in debug
+            logger.debug("Full extracted question (Gemini):")
+            logger.debug("------------------------")
+            logger.debug(extracted_question)
+            logger.debug("------------------------")
+            return extracted_question
+        else:
+            logger.warning("Gemini Vision did not return any text for question extraction.")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error extracting question with Gemini Vision: {e}", exc_info=True)
+        return None
+
+async def extract_question_from_ocr(image_url_or_base64, llm_router):
+    # This function uses the *text* from OCR, not the image directly with LLM
+    logger.info("Starting standard OCR + LLM question extraction pipeline.")
+    try:
+        # Perform OCR using the existing function (expects base64 string)
+        logger.debug("Performing OCR...")
+        ocr_text = ocr_image(base64_image=image_url_or_base64) # Pass the base64 string
+        if not ocr_text:
+            logger.warning("OCR returned no text.")
+            return None
+        logger.info(f"OCR successful, extracted {len(ocr_text)} characters.")
+
+        # Now, use LLM to extract and format the question from the OCR text
+        system_prompt = """You are a helpful assistant that extracts questions from OCR text. The text is from a screenshot of a test or exam. A question will be EITHER an MCQ OR a long-answer question, never both.
 
 DEFINITION OF MCQ (Multiple Choice Question):
 An MCQ consists of two parts that MUST ALWAYS BE PRESERVED TOGETHER:
@@ -305,33 +398,28 @@ Remember:
 - Keep ALL formatting exactly as in original
 - Do not add any labels or metadata
 - Preserve empty lines between parts"""
-        },
-        {
-            "role": "user",
-            "content": f"Extract and format the COMPLETE question from the following OCR text, preserving ALL options if it's an MCQ:\n\n{ocr_text}"
-        }
-    ]
-
-    try:
+        messages = [
+             # ... (Existing system prompt definition) ...
+             {
+                "role": "user",
+                "content": f"Extract and format the COMPLETE question from the following OCR text, preserving ALL options if it's an MCQ:\n\n{ocr_text}"
+             }
+        ]
+        # Use a text-based model, or Gemini can handle text too
+        model_to_use = "gemini-1.5-flash" # Or keep existing experimental model if preferred for text
         response = await llm_router.generate(
-            model="gemini-2.0-flash-exp",
+            model=model_to_use, # or "gemini-2.0-flash-exp"
             max_tokens=500,
             messages=messages,
-            temperature=0.2,  # Further reduced for more consistent formatting
+            temperature=0.2,
             top_p=0.9,
-            stop_sequences=["User:", "Human:", "Assistant:"],
+            # No image_data passed here
+            system=system_prompt
         )
-
         extracted_question = response.strip()
-        
-        # Log both preview and full question
-        logger.info(f"Extracted question preview: {extracted_question[:200]}...")
-        logger.info("Full extracted question:")
-        logger.info("------------------------")
-        logger.info(extracted_question)
-        logger.info("------------------------")
-        
+        logger.info(f"LLM extracted question from OCR text: {extracted_question[:200]}...")
         return extracted_question
+
     except Exception as e:
-        logger.error(f"Error extracting question from OCR text: {e}", exc_info=True)
-        raise
+        logger.error(f"Error in extract_question_from_ocr pipeline: {e}", exc_info=True)
+        return None # Return None on error

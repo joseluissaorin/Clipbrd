@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any, Tuple
 from functools import lru_cache
 from collections import deque
 import clipman
-from ocr import is_question_with_image, ocr_image, extract_question_from_ocr
+from ocr import is_question_with_image, ocr_image, extract_question_from_ocr, extract_question_from_image_gemini
 from question_processing import (get_answer_with_context, get_answer_without_context,
                                get_number_with_context, get_answer_with_image,
                                get_number_without_context, is_formatted_question)
@@ -256,7 +256,7 @@ class ClipboardProcessor:
             return False, text
 
     async def process_screenshot(self, app) -> None:
-        """Process screenshot with error handling."""
+        """Process screenshot with error handling and conditional pipeline."""
         if not self.screenshot:
             self.logger.warning("No screenshot data to process")
             return
@@ -273,55 +273,82 @@ class ClipboardProcessor:
 
             # Check if it's a question with an image
             self.logger.info("Checking if screenshot contains a question with image")
-            has_image = await is_question_with_image(self.screenshot, app.llm_router)
+            # Construct the data URL for image checking
+            image_data_url = f"data:image/png;base64,{self.screenshot}"
+            has_image = await is_question_with_image(image_data_url, app.llm_router)
             self.logger.info(f"Image detection result: {has_image}")
 
             if has_image:
                 self.logger.info("Question with image detected")
                 await self._process_image_question(app, self.screenshot)
             else:
-                self.logger.info("Extracting question from OCR text")
-                question = await extract_question_from_ocr(self.screenshot, app.llm_router)
+                # Image contains mostly text
+                self.logger.info("Screenshot detected as primarily text-based.")
+
+                # === Reload settings to avoid potential Tkinter thread issues ===
+                try:
+                    app.settings.settings = app.settings._load_settings()
+                    self.logger.debug("Reloaded settings from file before checking pipeline toggle.")
+                except Exception as load_err:
+                    self.logger.error(f"Error reloading settings: {load_err}. Proceeding with potentially stale settings.")
+                # ================================================================
+
+                # Check setting for which pipeline to use
+                use_formula_pipeline = app.settings.get_setting('formula_screenshot_pipeline')
+                self.logger.info(f"Formula support pipeline enabled: {use_formula_pipeline}")
+
+                question = None
+                if use_formula_pipeline:
+                    self.logger.info("Using Gemini Vision pipeline for question extraction.")
+                    try:
+                        # Pass the base64 data directly if that's what the function expects
+                        # Assuming image_data_url is correct based on extract_question_from_image_gemini signature
+                        question = await extract_question_from_image_gemini(image_data_url, app.llm_router)
+                    except Exception as gemini_e:
+                        self.logger.error(f"Error during Gemini Vision question extraction: {gemini_e}", exc_info=True)
+                        question = None # Fallback or handle error
+                else:
+                    self.logger.info("Using standard OCR + LLM pipeline for question extraction.")
+                    try:
+                        # Pass base64 string to the existing function
+                        question = await extract_question_from_ocr(self.screenshot, app.llm_router)
+                    except Exception as ocr_e:
+                        self.logger.error(f"Error during OCR+LLM question extraction: {ocr_e}", exc_info=True)
+                        question = None
+
+                # Proceed with the extracted question if found
                 if question:
-                    self.logger.info("Question extracted successfully")
-                    app.debug_info.append(f"Extracted question: {question[:200]}")
-                    
-                    # Split into non-empty lines
+                    self.logger.info("Question extracted successfully from screenshot text")
+                    app.debug_info.append(f"Extracted question: {question[:200]}...")
+
+                    # Split into non-empty lines for MCQ detection
                     lines = [line.strip() for line in question.split('\n') if line.strip()]
-                    
-                    # More flexible MCQ detection:
-                    # 1. Check for common option patterns
+
+                    # Flexible MCQ detection logic (remains the same)
                     option_patterns = [
-                        r'^[a-dA-D][\s\.\)]\s*\w+',  # a) b) c) d) or A. B. C. D.
+                        r'^[a-dA-D][\s\.\)]\s*\w+', # a) b) c) d) or A. B. C. D.
                         r'^[1-9][\s\.\)]\s*\w+',     # 1) 2) 3) or 1. 2. 3.
                         r'^\([a-dA-D]\)\s*\w+',      # (a) (b) (c) (d)
                         r'^\([1-9]\)\s*\w+'          # (1) (2) (3)
                     ]
-                    
-                    # Count lines that match option patterns
-                    option_count = sum(1 for line in lines[1:] 
+                    option_count = sum(1 for line in lines[1:]
                                      if any(re.match(pattern, line) for pattern in option_patterns))
-                    
-                    # Also check for simple options (short lines after the question)
                     short_lines = sum(1 for line in lines[1:] if len(line) < 100)
-                    
-                    # Consider it MCQ if:
-                    # - We have 2+ lines matching option patterns, OR
-                    # - We have 2+ short lines after a question
                     is_mcq = (option_count >= 2) or (len(lines) > 2 and short_lines >= 2)
-                    
+
                     self.logger.info(f"MCQ detection - Option matches: {option_count}, Short lines: {short_lines}")
-                    
+
+                    # Route to appropriate processing function
                     if is_mcq:
-                        self.logger.info("Processing as MCQ question")
+                        self.logger.info("Processing extracted text as MCQ question")
                         await self._process_mcq(app, question)
                     else:
-                        self.logger.info("Processing as long-answer question")
+                        self.logger.info("Processing extracted text as long-answer question")
                         await self._process_non_mcq(app, question)
                 else:
-                    self.logger.warning("No question could be extracted from OCR text")
+                    self.logger.warning("No question could be extracted from screenshot using the selected pipeline.")
                     app.update_icon(IconState.ERROR)
-                    await asyncio.sleep(2)  # Show error state briefly
+                    await asyncio.sleep(2) # Show error state briefly
                     app.update_icon(IconState.IDLE)
 
             self.logger.info("Screenshot processing completed successfully")
@@ -351,22 +378,25 @@ class ClipboardProcessor:
         """Process image-based question with error handling."""
         try:
             app.debug_info.append("Processing question with image")
+            
+            # Convert to the format expected by our updated llmrouter.py
             image_data = {
-                "url": f"data:image/png;base64,{base64_image}",
-                "detail": "high"
+                "base64": base64_image,
+                "mime_type": "image/png"
             }
             
-            answer_number = await asyncio.get_event_loop().run_in_executor(
-                None, get_answer_with_image,
+            # Process directly with the updated get_answer_with_image function
+            answer_text = await get_answer_with_image(
                 "Answer the following question", app.llm_router, image_data
             )
             
-            app.update_icon(f"Clipbrd: {answer_number}")
-            app.debug_info.append(f"MCQ answer with image: {answer_number}")
+            app.update_icon(f"Clipbrd: {answer_text[:10]}")
+            app.debug_info.append(f"MCQ answer with image: {answer_text[:200]}")
 
         except Exception as e:
-            logger.error(f"Error processing image question: {e}")
+            logger.error(f"Error processing image question: {e}", exc_info=True)
             app.update_icon("Clipbrd: Error")
+            app.debug_info.append(f"Image question error: {str(e)}")
 
     async def _process_text_from_image(self, app, base64_image: str) -> None:
         """Process text extracted from image with error handling."""

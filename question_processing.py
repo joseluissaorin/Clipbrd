@@ -637,38 +637,33 @@ Remember to answer in {detected_lang} with ONLY the letter or number."""
 
 
 async def get_answer_with_image(question, llm_router, image_data=None):
-   messages = [
-       {
-           "role": "user",
-           "content": [
-               {
-                   "type": "text",
-                   "text": question
-               },
-               {
-                   "type": "image_url",
-                   "image_url": {
-                       "url": image_data,
-                       "detail": "high"
-                   }
-               }
-           ]
-       }
-   ]
+   """Generate answer for a question that includes an image."""
+   try:
+       # Create simpler message structure compatible with the updated llmrouter.py
+       messages = [
+           {
+               "role": "user",
+               "content": question
+           }
+       ]
 
-   response = await llm_router.generate(
-       model="gemini-2.0-flash",
-       max_tokens=475,
-       messages=messages,
-       temperature=0.7,
-       top_p=0.9,
-       stop_sequences=["User:", "Human:", "Assistant:"],
-       system="You are a helpful and knowledgeable assistant. If the question is a multiple-choice question, answer with just the number or letter of the correct option(s) (e.g., 1., 2., 3., ... or a., b., c., ...). If it's a full question, provide a comprehensive answer in the language of the question using an academic style. Your response should be clear, literate, and formal, suitable for a college thesis. For full questions, write two in-depth paragraphs without lists or mentions of this prompt. Use the provided image to help answer the question."
-   )
+       response = await llm_router.generate(
+           model="gemini-2.0-flash",
+           max_tokens=475,
+           messages=messages,
+           temperature=0.7,
+           top_p=0.9,
+           stop_sequences=["User:", "Human:", "Assistant:"],
+           image_data=image_data,  # This now expects a dict with "base64" and "mime_type" keys
+           system="You are a helpful and knowledgeable assistant. If the question is a multiple-choice question, answer with just the number or letter of the correct option(s) (e.g., 1., 2., 3., ... or a., b., c., ...). If it's a full question, provide a comprehensive answer in the language of the question using an academic style. Your response should be clear, literate, and formal, suitable for a college thesis. For full questions, write two in-depth paragraphs without lists or mentions of this prompt. Use the provided image to help answer the question."
+       )
 
-   answer_text = response
-   print(f"Answer with image: {answer_text}")
-   return answer_text
+       answer_text = response
+       print(f"Answer with image: {answer_text}")
+       return answer_text
+   except Exception as e:
+       logger.error(f"Error in get_answer_with_image: {e}", exc_info=True)
+       return "Error generating answer with image"
 
 
 async def get_answer_without_context(question, llm_router, image_data=None):

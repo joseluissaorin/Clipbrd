@@ -11,7 +11,7 @@ from license_manager import LicenseManager
 from glob import glob
 import subprocess
 import platform
-from screenshot import load_shortcuts, save_shortcuts
+from screenshot import load_shortcuts, save_shortcuts, ScreenshotType
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def open_folder_in_explorer(path: str):
 @dataclass
 class AppSettings:
     """Application settings with defaults."""
-    theme: str = "light"
+    theme: str = "dark"
     check_interval: float = 0.1
     debug_mode: bool = False
     shortcuts: Dict[str, str] = None
@@ -85,13 +85,21 @@ class AppSettings:
     max_debug_entries: int = 100
     language: str = "en"
     documents_folder: str = get_default_documents_folder()
-    
+    formula_screenshot_pipeline: bool = False
+
     def __post_init__(self):
         if self.shortcuts is None:
             self.shortcuts = load_shortcuts()
 
     def save_shortcuts(self):
         """Save shortcuts to both settings and screenshot config."""
+        default_shortcuts = {
+            "full_screenshot": "<ctrl>+<shift>+f",
+            "reset_icon_shortcut": "<ctrl>+<shift>+i"
+        }
+        for key, value in default_shortcuts.items():
+            if key not in self.shortcuts:
+                self.shortcuts[key] = value
         save_shortcuts(self.shortcuts)
 
 class SettingsManager:
@@ -162,22 +170,35 @@ class SettingsManager:
             if self.settings_file.exists():
                 with open(self.settings_file, 'r') as f:
                     data = json.load(f)
-                return AppSettings(**data)
+                # Make sure loaded data includes new fields, providing defaults if missing
+                loaded_settings = AppSettings(**data)
+                # Ensure shortcuts are loaded correctly, merging with defaults
+                loaded_settings.shortcuts = load_shortcuts() # Reload shortcuts to merge saved ones with defaults
+                if 'formula_screenshot_pipeline' not in data:
+                    loaded_settings.formula_screenshot_pipeline = False # Default if missing
+                if 'theme' not in data:
+                    loaded_settings.theme = 'dark' # Default if missing
+                return loaded_settings
         except Exception as e:
-            logger.error(f"Error loading settings: {e}")
-        
-        return AppSettings()
+            logger.error(f"Error loading settings: {e}, falling back to defaults.")
+
+        # Fallback to default AppSettings if loading fails or file doesn't exist
+        default_settings = AppSettings()
+        default_settings.shortcuts = load_shortcuts() # Ensure defaults have shortcuts loaded
+        return default_settings
 
     def save_settings(self) -> bool:
         """Save current settings to file."""
         try:
+            # Ensure shortcuts are saved separately via its dedicated mechanism if needed elsewhere
+            # The AppSettings dataclass will handle serializing the current state of self.settings.shortcuts
             with open(self.settings_file, 'w') as f:
                 json.dump(asdict(self.settings), f, indent=2)
             self._update_logging_level()  # Update logging level after settings change
-            self.logger.debug("Settings saved successfully")
+            self.logger.debug("Settings saved successfully to settings.json")
             return True
         except Exception as e:
-            self.logger.error(f"Error saving settings: {e}")
+            self.logger.error(f"Error saving settings to settings.json: {e}")
             return False
 
     def update_setting(self, key: str, value: Any) -> bool:
@@ -204,125 +225,97 @@ class SettingsManager:
         return value
 
     def show_dialog(self):
-        """Show settings dialog with dynamic sizing."""
+        """Show settings dialog with dynamic sizing and layout."""
         # If window already exists, just focus it
         if self.settings_window is not None:
             try:
                 self.settings_window.focus_force()
                 self.settings_window.lift()  # Raise window to top
-                # On Windows, this helps with focus issues
-                if os.name == 'nt':
+                if os.name == 'nt': # On Windows, this helps with focus issues
                     self.settings_window.attributes('-topmost', 1)
                     self.settings_window.after(100, lambda: self.settings_window.attributes('-topmost', 0))
                 return
             except tk.TclError:
-                # Window was destroyed but reference remains
-                self.settings_window = None
+                self.settings_window = None # Window was destroyed
 
         # Create new window
         self.settings_window = tk.Tk()
         root = self.settings_window
         root.title("Clipbrd Settings")
-        
+
         # Ensure window appears in the foreground
         root.lift()
         root.focus_force()
-        
-        # On Windows, this helps with focus issues
         if os.name == 'nt':
             try:
                 root.attributes('-topmost', 1)
-                # Remove the topmost attribute after a short delay
                 root.after(100, lambda: root.attributes('-topmost', 0))
             except Exception as e:
                 self.logger.error(f"Error setting topmost attribute: {e}")
-        
-        # Define on_closing function at the start
+
+        # Define on_closing function
         def on_closing():
             self.settings_window = None
             root.destroy()
-            
-        # Set window close handler
+
         root.protocol("WM_DELETE_WINDOW", on_closing)
-        
+
         # Set window icon
         icon_dir = os.path.join(os.path.dirname(__file__), 'assets', 'icons')
         icon_path = os.path.join(icon_dir, 'clipbrd_windows.ico' if os.name == 'nt' else 'clipbrd_macos.png')
-        
         if os.path.exists(icon_path):
             try:
-                if os.name == 'nt':  # Windows
+                if os.name == 'nt':
                     root.iconbitmap(icon_path)
-                else:  # macOS/Linux
+                else:
                     img = Image.open(icon_path)
                     photo = ImageTk.PhotoImage(img)
                     root.iconphoto(True, photo)
-                    root.tk.call('wm', 'iconphoto', root._w, photo)
             except Exception as e:
                 logger.error(f"Error setting window icon: {e}")
-        
-        # Get screen dimensions
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        
-        # Create main container
-        main_container = ttk.Frame(root)
-        main_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        
-        # Configure grid weights for root
+
+        # Create main container & configure root grid
+        main_container = ttk.Frame(root, padding="10")
+        main_container.grid(row=0, column=0, sticky="nsew")
         root.grid_columnconfigure(0, weight=1)
         root.grid_rowconfigure(0, weight=1)
-        
-        # Create notebook for tabs
-        notebook = ttk.Notebook(main_container)
-        notebook.grid(row=0, column=0, sticky="nsew")
-        
-        # Configure grid weights for main container
+
+        # Configure main container grid
         main_container.grid_columnconfigure(0, weight=1)
         main_container.grid_rowconfigure(0, weight=1)
-        
-        # Create frames for each tab
-        general_frame = ttk.Frame(notebook)
+
+        # Create notebook
+        notebook = ttk.Notebook(main_container)
+        notebook.grid(row=0, column=0, sticky="nsew")
+
+        # === General Tab ===
+        general_frame = ttk.Frame(notebook, padding="10")
         notebook.add(general_frame, text="General")
-        
-        # Configure grid weights for frames
-        general_frame.grid_columnconfigure(1, weight=1)
+        general_frame.grid_columnconfigure(0, weight=1)
+        general_frame.grid_rowconfigure(3, weight=1) # Allow Debug log row to expand
 
-        # Screenshot shortcut in general settings
-        shortcut_frame = ttk.LabelFrame(general_frame, text="Screenshot", padding="10")
-        shortcut_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        shortcut_frame.grid_columnconfigure(1, weight=1)
-        
-        shortcut_label = ttk.Label(shortcut_frame, text="Full Screen Shortcut:")
-        shortcut_entry = ttk.Entry(shortcut_frame, width=20)
-        shortcut_entry.insert(0, self.settings.shortcuts.get("full_screenshot", "<ctrl>+<shift>+f"))
-        
-        shortcut_label.grid(row=0, column=0, padx=(0,5), pady=5, sticky='w')
-        shortcut_entry.grid(row=0, column=1, padx=5, pady=5, sticky='w')
-        
-        # License Frame
+        # --- Row Management for General Tab ---
+        general_row = 0
+
+        # --- License Frame ---
         license_frame = ttk.LabelFrame(general_frame, text="License", padding="10")
-        license_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 20))
+        license_frame.grid(row=general_row, column=0, sticky="ew", pady=(0, 10))
+        license_frame.grid_columnconfigure(0, weight=1)
+        general_row += 1
 
-        # License Status
         license_manager = LicenseManager()
 
         def refresh_license_frame():
-            # Clear all widgets in license frame
             for widget in license_frame.winfo_children():
                 widget.destroy()
 
             def check_license():
-                # Get stored license info
                 license_key, license_data = license_manager.get_stored_license()
-                
                 if license_key and license_data:
                     result = license_manager.verify_license()
                     if result['status'] == 'success':
-                        # Show active license status
                         ttk.Label(license_frame, text=result['message']).grid(row=0, column=0, sticky=tk.W)
-                        ttk.Button(license_frame, text="Deactivate License", 
-                                command=handle_deactivation).grid(row=1, column=0, pady=10)
+                        ttk.Button(license_frame, text="Deactivate License", command=handle_deactivation).grid(row=1, column=0, pady=5, sticky=tk.W)
                     else:
                         show_activation_form()
                 else:
@@ -331,37 +324,30 @@ class SettingsManager:
             def show_activation_form():
                 ttk.Label(license_frame, text="Enter License Key:").grid(row=0, column=0, sticky=tk.W)
                 license_entry = ttk.Entry(license_frame, width=40)
-                license_entry.grid(row=1, column=0, pady=5)
-                
-                def handle_activation():
-                    key = license_entry.get().strip()
-                    if not key:
-                        messagebox.showerror("Error", "Please enter a license key")
-                        return
+                license_entry.grid(row=1, column=0, pady=(5,0), sticky=tk.W)
+                activate_button = ttk.Button(license_frame, text="Activate License", command=lambda: handle_activation(license_entry, activate_button))
+                activate_button.grid(row=2, column=0, pady=5, sticky=tk.W)
 
-                    try:
-                        activate_button.configure(state="disabled", text="Activating...")
-                        root.update()
-
-                        result = license_manager.activate_license(key)
-                        
-                        if result['status'] == 'success':
-                            messagebox.showinfo("Success", result['message'])
-                            refresh_license_frame()
-                        else:
-                            messagebox.showerror("Error", result.get('message', 'Invalid license key'))
-                            if activate_button.winfo_exists():
-                                activate_button.configure(state="normal", text="Activate License")
-                    except Exception as e:
-                        messagebox.showerror("Error", str(e))
-                        if activate_button.winfo_exists():
-                            activate_button.configure(state="normal", text="Activate License")
-                    finally:
-                        if root.winfo_exists():
-                            root.update()
-
-                activate_button = ttk.Button(license_frame, text="Activate License", command=handle_activation)
-                activate_button.grid(row=2, column=0, pady=5)
+            def handle_activation(license_entry, activate_button):
+                key = license_entry.get().strip()
+                if not key:
+                    messagebox.showerror("Error", "Please enter a license key")
+                    return
+                try:
+                    activate_button.configure(state="disabled", text="Activating...")
+                    root.update()
+                    result = license_manager.activate_license(key)
+                    if result['status'] == 'success':
+                        messagebox.showinfo("Success", result['message'])
+                        refresh_license_frame()
+                    else:
+                        messagebox.showerror("Error", result.get('message', 'Invalid license key'))
+                        if activate_button.winfo_exists(): activate_button.configure(state="normal", text="Activate License")
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
+                    if activate_button.winfo_exists(): activate_button.configure(state="normal", text="Activate License")
+                finally:
+                    if root.winfo_exists(): root.update()
 
             def handle_deactivation():
                 if messagebox.askyesno("Confirm Deactivation", "Are you sure you want to deactivate your license?"):
@@ -369,119 +355,70 @@ class SettingsManager:
                     messagebox.showinfo("Success", "License deactivated successfully")
                     refresh_license_frame()
 
-            # Start the license check
             check_license()
 
-        # Initial license frame setup
-        refresh_license_frame()
+        refresh_license_frame() # Initial license check
 
-        # Settings Frame
-        settings_frame = ttk.LabelFrame(general_frame, text="Settings", padding="10")
-        settings_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
-        settings_frame.grid_columnconfigure(0, weight=1)
+        # --- Settings Frame ---
+        settings_row = 0
+        app_settings_frame = ttk.LabelFrame(general_frame, text="Application Settings", padding="10")
+        app_settings_frame.grid(row=general_row, column=0, sticky="ew", pady=(0, 10))
+        app_settings_frame.grid_columnconfigure(1, weight=1)
+        general_row += 1
 
-        # Debug Mode and Log Viewer
-        debug_frame = ttk.Frame(settings_frame)
-        debug_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        
-        def on_debug_toggle():
-            debug_log.grid_remove() if not debug_var.get() else debug_log.grid()
-            if debug_var.get():
-                update_debug_log()
-                # Adjust window size when showing debug log
-                root.after(100, lambda: root.geometry(f"{window_width}x{window_height}"))
-        
-        debug_var = tk.BooleanVar(value=self.settings.debug_mode)
-        debug_cb = ttk.Checkbutton(debug_frame, text="Debug Mode", variable=debug_var, command=on_debug_toggle)
-        debug_cb.grid(row=0, column=0, sticky=tk.W)
-        
-        # Debug Log Viewer
-        debug_log = ttk.Frame(settings_frame)
-        debug_log.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        debug_log.grid_columnconfigure(0, weight=1)
-        
-        if not debug_var.get():
-            debug_log.grid_remove()
-            
-        # Create Text widget with scrollbar for debug messages
-        debug_text = tk.Text(debug_log, height=10, width=40, wrap=tk.WORD)
-        debug_scrollbar = ttk.Scrollbar(debug_log, orient="vertical", command=debug_text.yview)
-        debug_text.configure(yscrollcommand=debug_scrollbar.set)
-        
-        debug_text.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        debug_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        
-        # Add clear and refresh buttons
-        button_frame = ttk.Frame(debug_log)
-        button_frame.grid(row=1, column=0, columnspan=2, pady=5)
-        
-        def clear_debug_log():
-            debug_text.delete(1.0, tk.END)
-            
-        def update_debug_log():
-            if not debug_var.get():
-                return
-            try:
-                # Get the log file path
-                log_file = self.app_data_dir / "debug.log"
-                if log_file.exists():
-                    with open(log_file, 'r', encoding='utf-8') as f:
-                        # Read last 50 lines
-                        lines = f.readlines()[-50:]
-                        debug_text.delete(1.0, tk.END)
-                        debug_text.insert(tk.END, "".join(lines))
-                        debug_text.see(tk.END)  # Scroll to bottom
-            except Exception as e:
-                debug_text.delete(1.0, tk.END)
-                debug_text.insert(tk.END, f"Error reading debug log: {str(e)}")
-        
-        ttk.Button(button_frame, text="Clear", command=clear_debug_log).grid(row=0, column=0, padx=5)
-        ttk.Button(button_frame, text="Refresh", command=update_debug_log).grid(row=0, column=1, padx=5)
-        
-        # Auto-update debug log every 2 seconds if debug mode is on
-        def auto_update_debug():
-            if root.winfo_exists() and debug_var.get():
-                update_debug_log()
-                root.after(2000, auto_update_debug)
-        
-        auto_update_debug()
+        # Theme Selection
+        ttk.Label(app_settings_frame, text="Theme:").grid(row=settings_row, column=0, sticky=tk.W, pady=2, padx=(0, 5))
+        theme_var = tk.StringVar(value=self.settings.theme)
+        theme_combo = ttk.Combobox(app_settings_frame, textvariable=theme_var, values=["dark", "light"], state="readonly", width=18)
+        theme_combo.grid(row=settings_row, column=1, sticky=tk.W, pady=2)
+        settings_row += 1
 
-        # Other settings continue below the debug section
         # Notification Sound
         notif_sound_var = tk.BooleanVar(value=self.settings.notification_sound)
-        ttk.Checkbutton(settings_frame, text="Notification Sound", variable=notif_sound_var).grid(row=2, column=0, sticky=tk.W, pady=5)
+        ttk.Checkbutton(app_settings_frame, text="Notification Sound", variable=notif_sound_var).grid(row=settings_row, column=0, columnspan=2, sticky=tk.W, pady=2)
+        settings_row += 1
 
         # Minimize to Tray
         minimize_var = tk.BooleanVar(value=self.settings.minimize_to_tray)
-        ttk.Checkbutton(settings_frame, text="Minimize to Tray", variable=minimize_var).grid(row=3, column=0, sticky=tk.W, pady=5)
+        ttk.Checkbutton(app_settings_frame, text="Minimize to Tray", variable=minimize_var).grid(row=settings_row, column=0, columnspan=2, sticky=tk.W, pady=2)
+        settings_row += 1
 
-        # Language (commented out but need to define the variable for save_settings)
-        # ttk.Label(settings_frame, text="Language:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        # Formula Screenshot Pipeline
+        formula_pipeline_var = tk.BooleanVar(value=self.settings.formula_screenshot_pipeline)
+        formula_cb = ttk.Checkbutton(app_settings_frame, text="Formula support for Screenshot (Experimental, uses Gemini)", variable=formula_pipeline_var)
+        formula_cb.grid(row=settings_row, column=0, columnspan=2, sticky=tk.W, pady=2)
+        settings_row += 1
+
+        # Debug Mode (Checkbox only, Log appears separately)
+        debug_var = tk.BooleanVar(value=self.settings.debug_mode)
+        debug_cb = ttk.Checkbutton(app_settings_frame, text="Show Debug Log", variable=debug_var)
+        debug_cb.grid(row=settings_row, column=0, columnspan=2, sticky=tk.W, pady=2)
+        settings_row += 1
+
+        # Language (Variable defined for saving, UI commented out)
         lang_var = tk.StringVar(value=self.settings.language)
-        # lang_combo = ttk.Combobox(settings_frame, textvariable=lang_var, values=["en", "es", "fr", "de"], state="readonly")
-        # lang_combo.grid(row=4, column=1, sticky=tk.W, pady=5)
 
         # Document Folder Selection
-        folder_frame = ttk.Frame(settings_frame)
-        folder_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        folder_frame = ttk.Frame(app_settings_frame)
+        folder_frame.grid(row=settings_row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=2)
         folder_frame.grid_columnconfigure(1, weight=1)
-        
+        settings_row += 1
+
         ttk.Label(folder_frame, text="Documents Folder:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         folder_var = tk.StringVar(value=self.settings.documents_folder)
         folder_entry = ttk.Entry(folder_frame, textvariable=folder_var, state="readonly")
         folder_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
-        
+
         def browse_folder():
             folder = filedialog.askdirectory(initialdir=folder_var.get())
             if folder:
                 folder = ensure_clipbrd_folder(folder)
                 folder_var.set(folder)
-        
-        button_frame = ttk.Frame(folder_frame)
-        button_frame.grid(row=0, column=2)
-        
-        ttk.Button(button_frame, text="Browse", command=browse_folder).grid(row=0, column=0, padx=2)
-        
+
+        folder_button_frame = ttk.Frame(folder_frame)
+        folder_button_frame.grid(row=0, column=2)
+        ttk.Button(folder_button_frame, text="Browse", command=browse_folder).grid(row=0, column=0, padx=2)
+
         def open_current_folder():
             current_folder = folder_var.get()
             if not os.path.exists(current_folder):
@@ -492,38 +429,158 @@ class SettingsManager:
                     return
             if not open_folder_in_explorer(current_folder):
                 messagebox.showerror("Error", "Could not open the folder.")
-        
-        ttk.Button(button_frame, text="Open", command=open_current_folder).grid(row=0, column=1, padx=2)
+        ttk.Button(folder_button_frame, text="Open", command=open_current_folder).grid(row=0, column=1, padx=2)
 
-        def save_settings():
+
+        # --- Shortcuts Frame ---
+        shortcut_row = 0
+        shortcuts_frame = ttk.LabelFrame(general_frame, text="Shortcuts", padding="10")
+        shortcuts_frame.grid(row=general_row, column=0, sticky="ew", pady=(0, 10))
+        shortcuts_frame.grid_columnconfigure(1, weight=1)
+        general_row += 1
+
+        # Full Screenshot Shortcut
+        ttk.Label(shortcuts_frame, text="Full Screen Screenshot:").grid(row=shortcut_row, column=0, padx=(0,5), pady=2, sticky='w')
+        full_shortcut_var = tk.StringVar(value=self.settings.shortcuts.get("full_screenshot", "<ctrl>+<shift>+f"))
+        full_shortcut_entry = ttk.Entry(shortcuts_frame, textvariable=full_shortcut_var, width=20)
+        full_shortcut_entry.grid(row=shortcut_row, column=1, padx=5, pady=2, sticky='w')
+        shortcut_row += 1
+
+        # Reset Icon Shortcut
+        ttk.Label(shortcuts_frame, text="Reset Icon:").grid(row=shortcut_row, column=0, padx=(0,5), pady=2, sticky='w')
+        reset_shortcut_var = tk.StringVar(value=self.settings.shortcuts.get("reset_icon_shortcut", "<ctrl>+<shift>+i"))
+        reset_shortcut_entry = ttk.Entry(shortcuts_frame, textvariable=reset_shortcut_var, width=20)
+        reset_shortcut_entry.grid(row=shortcut_row, column=1, padx=5, pady=2, sticky='w')
+        shortcut_row += 1
+        # Add other screenshot shortcuts here if needed
+
+
+        # --- Debug Log Frame (Conditional Display) ---
+        debug_log_frame = ttk.LabelFrame(general_frame, text="Debug Log", padding="10")
+        # Grid positioning is handled by on_debug_toggle
+
+        debug_log_frame.grid_columnconfigure(0, weight=1)
+        debug_log_frame.grid_rowconfigure(0, weight=1) # Allow text area to expand
+
+        debug_text = tk.Text(debug_log_frame, height=10, width=60, wrap=tk.WORD)
+        debug_scrollbar = ttk.Scrollbar(debug_log_frame, orient="vertical", command=debug_text.yview)
+        debug_text.configure(yscrollcommand=debug_scrollbar.set)
+        debug_text.grid(row=0, column=0, sticky="nsew")
+        debug_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        debug_button_frame = ttk.Frame(debug_log_frame)
+        debug_button_frame.grid(row=1, column=0, columnspan=2, pady=(5,0), sticky='ew')
+        # Center buttons using pack within the frame
+        clear_button = ttk.Button(debug_button_frame, text="Clear", command=lambda: debug_text.delete(1.0, tk.END))
+        clear_button.pack(side=tk.LEFT, padx=5)
+
+        def update_debug_log():
+            if not debug_var.get(): return
             try:
+                log_file = self.app_data_dir / "debug.log"
+                if log_file.exists():
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()[-100:] # Show last 100 lines
+                        debug_text.delete(1.0, tk.END)
+                        debug_text.insert(tk.END, "".join(lines))
+                        debug_text.see(tk.END)
+                else:
+                    debug_text.delete(1.0, tk.END)
+                    debug_text.insert(tk.END, "Debug log file not found.")
+            except Exception as e:
+                logger.warning(f"Error reading debug log: {e}")
+                debug_text.delete(1.0, tk.END)
+                debug_text.insert(tk.END, f"Error reading debug log: {str(e)}")
+
+        refresh_button = ttk.Button(debug_button_frame, text="Refresh", command=update_debug_log)
+        refresh_button.pack(side=tk.LEFT, padx=5)
+
+        # --- Save Settings Function (Define before used by button and toggle logic) ---
+        def save_settings_action(): # Renamed to avoid conflict with class method
+            try:
+                # 1. Update settings object from UI variables
                 self.settings.debug_mode = debug_var.get()
+                self.settings.theme = theme_var.get()
                 self.settings.notification_sound = notif_sound_var.get()
                 self.settings.minimize_to_tray = minimize_var.get()
-                self.settings.language = lang_var.get()
+                self.settings.formula_screenshot_pipeline = formula_pipeline_var.get()
+                self.settings.language = lang_var.get() # Save even if UI commented
                 self.settings.documents_folder = folder_var.get()
-                
-                # Save screenshot shortcut
-                new_shortcuts = {"full_screenshot": shortcut_entry.get()}
-                self.settings.shortcuts = new_shortcuts
-                save_shortcuts(new_shortcuts)
-                
-                self.save_settings()
-                messagebox.showinfo("Success", "Settings saved successfully!")
+
+                # Update shortcuts in the settings object's dictionary
+                current_shortcuts = self.settings.shortcuts if self.settings.shortcuts else {}
+                current_shortcuts["full_screenshot"] = full_shortcut_var.get()
+                current_shortcuts["reset_icon_shortcut"] = reset_shortcut_var.get()
+                self.settings.shortcuts = current_shortcuts # Assign back
+
+                # 2. Persist shortcuts using the dedicated save_shortcuts function
+                save_shortcuts(self.settings.shortcuts)
+
+                # 3. Persist all settings to settings.json
+                save_successful = self.save_settings() # Call the SettingsManager method
+
+                if save_successful:
+                    messagebox.showinfo("Success", "Settings saved successfully!")
+                else:
+                    messagebox.showerror("Error", "Failed to save settings to file.")
+
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save settings: {e}")
+                logger.error(f"Failed to save settings: {e}", exc_info=True)
             finally:
-                on_closing()
+                on_closing() # Close dialog
 
-        # Save Button
-        ttk.Button(general_frame, text="Save", command=save_settings).grid(row=3, column=0, pady=20)
+        # --- Create Save Button (Before on_debug_toggle needs it) ---
+        save_button = ttk.Button(general_frame, text="Save Settings", command=save_settings_action)
+        # Grid placement happens inside on_debug_toggle
+
+        # --- Define Debug Toggle Logic ---
+        def on_debug_toggle():
+            current_debug_row = general_row # Capture the row where debug log *would* go
+            if debug_var.get():
+                debug_log_frame.grid(row=current_debug_row, column=0, sticky='nsew', pady=(0, 10))
+                general_frame.grid_rowconfigure(current_debug_row, weight=1)
+                update_debug_log()
+                save_button_row = current_debug_row + 1 # Place save button below log
+            else:
+                debug_log_frame.grid_remove()
+                general_frame.grid_rowconfigure(current_debug_row, weight=0)
+                save_button_row = current_debug_row # Place save button where log would have been
+
+            # Adjust save button position
+            save_button.grid(row=save_button_row, column=0, pady=(10, 0), sticky='ew')
+
+        # --- Final Setup ---
+        debug_cb.config(command=on_debug_toggle) # Set the command after button and function are defined
+        on_debug_toggle() # Call initially to set visibility and save button position
+
+        def auto_update_debug():
+            if root.winfo_exists() and debug_var.get():
+                update_debug_log()
+                root.after(2000, auto_update_debug)
+        auto_update_debug()
+
+        # Remove the previous save button creation/grid call as it's now handled above
+        # --- Save Button --- (Position adjusted by on_debug_toggle)
+        # save_button = ttk.Button(general_frame, text="Save Settings", command=None) # Command set later
+
+        # Assign command to save button (already done above)
+        # save_button.config(command=save_settings_action)
+
+        # === Other Tabs (Placeholder) ===
+        # advanced_frame = ttk.Frame(notebook, padding="10")
+        # notebook.add(advanced_frame, text="Advanced")
 
         try:
+            # Let the window determine its size initially
+            root.update_idletasks()
+            # Optional: Set a minimum size
+            # root.minsize(root.winfo_reqwidth(), root.winfo_reqheight())
+
             root.mainloop()
         except Exception as e:
-            logger.error(f"Error in settings dialog: {e}")
-            self.settings_window = None
+            logger.error(f"Error in settings dialog mainloop: {e}", exc_info=True)
+            self.settings_window = None # Ensure reference is cleared
             try:
-                root.destroy()
-            except:
-                pass
+                if root.winfo_exists(): root.destroy()
+            except: pass # Ignore destroy errors

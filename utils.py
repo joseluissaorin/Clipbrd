@@ -92,20 +92,32 @@ def create_text_image(text, width=72, height=72, background_color='black', text_
         except Exception as e:
             logger.warning(f"Failed to render with emojis, falling back to text-only: {e}")
             # Fallback to text-only if emoji rendering fails
+            
+            # For text-only mode, use a larger font to match emoji appearance
+            text_only_font_size = int(font_size * 1.2)  # 20% larger font for text-only mode
+            text_font = ImageFont.truetype(font_path, text_only_font_size)
+            
+            # Create a drawing context
             draw = ImageDraw.Draw(image)
             
-            # Calculate text size using font.getbbox (new Pillow method)
-            bbox = font.getbbox(text)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
+            # The key to proper centering: use textbbox instead of getbbox
+            # textbbox gives the actual box where text would be drawn at a specific position
+            # Using (0,0) as reference point
+            text_bbox = draw.textbbox((0, 0), text, font=text_font)
             
-            # Center the text
-            x = int((width - text_width) / 2)
-            y = int((height - text_height) / 2)
+            # Calculate text dimensions from the bounding box
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
             
-            # Draw text without emojis
-            draw.text((x, y), text, fill=text_color, font=font)
-            logger.info(f"Created text-only image: {text}")
+            # Calculate centering offsets, accounting for the bbox offsets
+            # The key is to subtract the bbox origin (bbox[0], bbox[1])
+            # This accounts for any "empty space" or offset in the font itself
+            x = (width - text_width) // 2 - text_bbox[0]
+            y = (height - text_height) // 2 - text_bbox[1]
+            
+            # Draw text at the calculated position for perfect centering
+            draw.text((x, y), text, fill=text_color, font=text_font)
+            logger.info(f"Created text-only image with size {text_only_font_size}: {text}")
             
             return image
         

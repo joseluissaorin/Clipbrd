@@ -13,6 +13,7 @@ from license_manager import LicenseManager
 from llmrouter import LLMRouter
 from document_processing import process_documents
 from screenshot import ScreenshotManager, ScreenshotConfig, ScreenshotType
+from pynput import keyboard
 
 def is_running_from_exe() -> bool:
     """Check if the application is running from a compiled executable."""
@@ -70,6 +71,7 @@ class Clipbrd:
         self.documents = None
         # Initialize clipboard processor after license check
         self.clipboard = None
+        self.reset_hotkey_listener = None
     
     def setup_logging(self):
         logging.basicConfig(
@@ -92,23 +94,20 @@ class Clipbrd:
                 self.logger.error("Failed to install dependencies")
                 return False
             
-            # Setup platform interface
+            # Setup platform interface, passing settings
             platform_config = PlatformConfig(
                 app_name="Clipbrd",
                 icon_path=self.get_icon_path(),
                 menu_items=self.get_menu_items(),
                 debug_mode=self.settings.get_setting('debug_mode')
             )
-            self.platform = create_platform_interface(platform_config)
+            self.platform = create_platform_interface(platform_config, self.settings)
             
             if not self.platform.initialize():
                 self.logger.error("Failed to initialize platform interface")
                 return False
 
             # Set up screenshot callback
-            self.platform.set_screenshot_callback(self.handle_screenshot)
-            
-            # Initialize screenshot shortcuts
             self._setup_screenshot_shortcuts()
 
             # Check license before initializing components
@@ -171,7 +170,7 @@ class Clipbrd:
             self.clipboard = ClipboardProcessor()
             
             # Pass the search components to the clipboard processor
-            if self.search and self.inverted_index:
+            if self.search and self.inverted_index and self.documents:
                 self.logger.info("Passing initialized search components to clipboard processor")
                 self.clipboard.search = self.search
                 self.clipboard.inverted_index = self.inverted_index
@@ -182,12 +181,15 @@ class Clipbrd:
                 self.clipboard.inverted_index = None
                 self.clipboard.documents = self.documents if self.documents else []
 
+            # Setup the reset icon shortcut listener
+            self._setup_reset_shortcut()
+
             self.running = True
             self.logger.info("Application initialized successfully")
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to initialize application: {e}")
+            self.logger.error(f"Failed to initialize application: {e}", exc_info=True)
             return False
     
     def get_icon_path(self) -> str:
@@ -241,10 +243,19 @@ class Clipbrd:
     def cleanup(self):
         """Clean up resources."""
         try:
+            # Stop the reset shortcut listener
+            if self.reset_hotkey_listener:
+                self.logger.debug("Stopping reset hotkey listener")
+                self.reset_hotkey_listener.stop()
+                self.reset_hotkey_listener = None
+
             if self.platform:
                 self.platform.cleanup()
             if self.clipboard:
                 self.clipboard.cleanup()
+            # Cleanup screenshot manager shortcuts
+            if hasattr(self, 'screenshot_manager') and self.screenshot_manager:
+                self.screenshot_manager.cleanup()
         except Exception as e:
             self.logger.error(f"Error during cleanup: {e}")
     
@@ -333,6 +344,40 @@ class Clipbrd:
             self.logger.debug("Screenshot manager initialized with shortcuts")
         else:
             self.logger.error("Failed to initialize screenshot manager")
+
+    def _setup_reset_shortcut(self):
+        """Set up the keyboard shortcut to reset the icon to IDLE."""
+        try:
+            shortcuts = self.settings.get_setting('shortcuts')
+            if not shortcuts:
+                self.logger.warning("Shortcuts not loaded, cannot set up reset shortcut.")
+                return
+
+            shortcut_key = shortcuts.get('reset_icon_shortcut', '<ctrl>+<shift>+i')
+
+            if not shortcut_key:
+                 self.logger.warning("Reset icon shortcut key is empty.")
+                 return
+
+            def on_reset_activate():
+                self.logger.info(f"Reset icon shortcut ({shortcut_key}) activated.")
+                self.update_icon(IconState.IDLE)
+
+            if self.reset_hotkey_listener:
+                self.reset_hotkey_listener.stop()
+
+            self.reset_hotkey_listener = keyboard.GlobalHotKeys({
+                shortcut_key: on_reset_activate
+            })
+            self.reset_hotkey_listener.start()
+            self.logger.info(f"Reset icon shortcut '{shortcut_key}' set up successfully.")
+
+        except Exception as e:
+            self.logger.error(f"Error setting up reset icon shortcut: {e}", exc_info=True)
+            if self.reset_hotkey_listener:
+                 try: self.reset_hotkey_listener.stop()
+                 except: pass
+            self.reset_hotkey_listener = None
 
     async def handle_screenshot(self, screenshot_type: str):
         """Handle screenshot capture request."""
