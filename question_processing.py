@@ -10,7 +10,7 @@ async def detect_language(text, llm_router):
     """Detect the language of the given text using LLM."""
     try:
         response = await llm_router.generate(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash-lite",
             max_tokens=2,
             messages=[
                 {
@@ -39,7 +39,7 @@ async def is_formatted_question(text, llm_router):
         return True, clipboard
     else:
         response = await llm_router.generate(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-lite",
             max_tokens=1,
             messages=[
                 {
@@ -297,7 +297,7 @@ async def is_formatted_question(text, llm_router):
 
 async def is_question(text, llm_router):
     response = await llm_router.generate(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash-preview-04-17",
         max_tokens=3,
         messages=[
             {
@@ -324,7 +324,7 @@ async def get_related_terms(question, llm_router):
     try:
         logger.info(f"Generating related terms for question: {question[:200]}...")
         related_terms_response = await llm_router.generate(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash-lite",
             max_tokens=30,
             messages=[
                 {
@@ -512,7 +512,7 @@ async def get_answer_with_context(question, llm_router, search, inverted_index, 
         ]
 
         response = await llm_router.generate(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash-preview-04-17",
             max_tokens=475,
             messages=messages,
             temperature=0.7,
@@ -576,7 +576,7 @@ async def get_number_with_context(question, llm_router, search, inverted_index, 
             try:
                 response = await asyncio.wait_for(
                     llm_router.generate(
-                        model="gemini-2.0-flash",
+                        model="gemini-2.5-flash-preview-04-17",
                         max_tokens=2,
                         messages=messages,
                         temperature=0.7,
@@ -648,7 +648,7 @@ async def get_answer_with_image(question, llm_router, image_data=None):
        ]
 
        response = await llm_router.generate(
-           model="gemini-2.0-flash",
+           model="gemini-2.5-flash-preview-04-17",
            max_tokens=475,
            messages=messages,
            temperature=0.7,
@@ -680,7 +680,7 @@ async def get_answer_without_context(question, llm_router, image_data=None):
    ]
 
    response = await llm_router.generate(
-       model="gemini-2.0-flash",
+       model="gemini-2.5-flash-preview-04-17",
        max_tokens=650,
        messages=messages,
        temperature=0.7,
@@ -702,9 +702,7 @@ El concepto de democracia ha evolucionado significativamente a lo largo de la hi
 La interpretación moderna de la democracia abarca no solo el derecho básico al voto, sino también conceptos más amplios como las libertades civiles, los derechos humanos y el estado de derecho. Estos elementos trabajan en conjunto para crear sistemas políticos que buscan equilibrar las libertades individuales con el bienestar colectivo, aunque los mecanismos específicos y los arreglos institucionales varían significativamente entre las diferentes naciones democráticas.
 
 [French Example]
-Le concept de démocratie a considérablement évolué au cours de l'histoire humaine, se développant depuis ses origines dans la Grèce antique jusqu'aux systèmes complexes de gouvernance que nous connaissons aujourd'hui. Les principes fondamentaux de participation citoyenne, de représentation et de prise de décision collective sont restés constants, bien que leur mise en œuvre se soit adaptée pour répondre aux besoins changeants des sociétés à travers différentes cultures et périodes.
-
-L'interprétation moderne de la démocratie englobe non seulement le droit fondamental de vote, mais aussi des concepts plus larges tels que les libertés civiles, les droits de l'homme et l'état de droit. Ces éléments fonctionnent de concert pour créer des systèmes politiques qui s'efforcent d'équilibrer les libertés individuelles avec le bien-être collectif, bien que les mécanismes spécifiques et les arrangements institutionnels varient considérablement selon les différentes nations démocratiques."""
+Le concept de démocratie a considérablement évolué au cours de l'histoire humaine, se développant depuis ses origines dans la Grèce antique jusqu'aux systèmes complexes de gouvernance que nous connaissons aujourd'hui. Les principes fondamentaux de participation citoyenne, de représentation et de prise de décision collective sont restés constants, bien que leur mise en œuvre se soit adaptée pour répondre aux besoins changeants des sociétés à travers différentes cultures et périodes."""
    )
 
    # Extracting the answer text from the response
@@ -724,7 +722,7 @@ async def get_number_without_context(question, llm_router, image_data=None):
    ]
 
    response = await llm_router.generate(
-       model="gemini-2.0-flash",
+       model="gemini-2.5-flash-preview-04-17",
        max_tokens=2,
        messages=messages,
        temperature=0.7,

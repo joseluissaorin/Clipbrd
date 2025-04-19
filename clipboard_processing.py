@@ -390,12 +390,23 @@ class ClipboardProcessor:
                 "Answer the following question", app.llm_router, image_data
             )
             
-            app.update_icon(f"Clipbrd: {answer_text[:10]}")
-            app.debug_info.append(f"MCQ answer with image: {answer_text[:200]}")
+            # Extract only the leading number/letter (e.g., "1.", "a", "C)", "(b)")
+            extracted_answer = "Error" # Default value
+            if answer_text:
+                match = re.match(r"^\s*([\w\d]+[\.\)]?)", answer_text)
+                if match:
+                    extracted_answer = match.group(1).strip()
+                else:
+                    logger.warning(f"Could not extract MCQ answer from: '{answer_text}'")
+            else:
+                logger.warning("Received empty answer text from LLM for image question.")
+
+            app.update_icon(IconState.MCQ_ANSWER, text=extracted_answer) # Use correct state and extracted text
+            app.debug_info.append(f"MCQ answer with image: {extracted_answer}")
 
         except Exception as e:
             logger.error(f"Error processing image question: {e}", exc_info=True)
-            app.update_icon("Clipbrd: Error")
+            app.update_icon(IconState.ERROR) # Use ERROR state on exception
             app.debug_info.append(f"Image question error: {str(e)}")
 
     async def _process_text_from_image(self, app, base64_image: str) -> None:
